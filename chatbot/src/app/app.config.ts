@@ -1,4 +1,4 @@
-import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, InjectionToken, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
 import {
@@ -27,6 +27,9 @@ export interface RuntimeConfig {
 }
 
 export const AGENT_PATH = '/api/agent';
+
+/** Scope for token #1 (chatbot -> agent API). */
+export const AGENT_SCOPE = new InjectionToken<string>('AGENT_SCOPE');
 
 export function buildAppConfig(config: RuntimeConfig): ApplicationConfig {
   const agentScope = `api://${config.agentApiClientId}/access_as_user`;
@@ -61,6 +64,7 @@ export function buildAppConfig(config: RuntimeConfig): ApplicationConfig {
       { provide: MSAL_INSTANCE, useValue: msalInstance },
       { provide: MSAL_GUARD_CONFIG, useValue: guardConfig },
       { provide: MSAL_INTERCEPTOR_CONFIG, useValue: interceptorConfig },
+      { provide: AGENT_SCOPE, useValue: agentScope },
       MsalService,
       MsalGuard,
       MsalBroadcastService,

@@ -1,7 +1,10 @@
 import os
+import socket
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
+from fastmcp.tools import ToolResult
 
 app = FastMCP("Weather MCP Server")
 
@@ -19,6 +22,21 @@ WMO_CODES = {
 }
 
 
+def _hop_meta() -> dict:
+    """What this server actually received from the MCP Gateway (shown in the chatbot's traffic panel)."""
+    headers = get_http_headers(include_all=True)
+    return {
+        "served_by": socket.gethostname(),
+        "user_id": headers.get("x-mcp-userid"),
+        "roles": [r for r in headers.get("x-mcp-roles", "").split(",") if r],
+        "authorization_header_received": "authorization" in headers,
+    }
+
+
+def _result(data: dict) -> ToolResult:
+    return ToolResult(structured_content=data, meta={"hop": _hop_meta()})
+
+
 def _geocode(city: str) -> dict:
     resp = httpx.get(GEOCODE_URL, params={"name": city, "count": 1}, timeout=10)
     resp.raise_for_status()
@@ -29,11 +47,11 @@ def _geocode(city: str) -> dict:
 
 
 @app.tool()
-def get_current_weather(city: str) -> dict:
+def get_current_weather(city: str) -> ToolResult:
     """Get the current weather for a city (temperature in °C, wind in km/h)."""
     print(f"[weather] get_current_weather({city!r})")
     if MOCK:
-        return {"city": city, "temperature_c": 31.0, "conditions": "partly cloudy", "wind_kmh": 9.0, "mock": True}
+        return _result({"city": city, "temperature_c": 31.0, "conditions": "partly cloudy", "wind_kmh": 9.0, "mock": True})
 
     place = _geocode(city)
     resp = httpx.get(
@@ -48,7 +66,7 @@ def get_current_weather(city: str) -> dict:
     )
     resp.raise_for_status()
     current = resp.json()["current"]
-    return {
+    return _result({
         "city": place["name"],
         "country": place.get("country"),
         "time": current["time"],
@@ -56,16 +74,16 @@ def get_current_weather(city: str) -> dict:
         "humidity_pct": current["relative_humidity_2m"],
         "conditions": WMO_CODES.get(current["weather_code"], f"code {current['weather_code']}"),
         "wind_kmh": current["wind_speed_10m"],
-    }
+    })
 
 
 @app.tool()
-def get_forecast(city: str, days: int = 3) -> dict:
+def get_forecast(city: str, days: int = 3) -> ToolResult:
     """Get a daily forecast for a city for the next 1-7 days."""
     print(f"[weather] get_forecast({city!r}, {days})")
     days = max(1, min(days, 7))
     if MOCK:
-        return {"city": city, "days": [{"date": f"day+{i}", "min_c": 26, "max_c": 33, "precip_mm": 2.0} for i in range(days)], "mock": True}
+        return _result({"city": city, "days": [{"date": f"day+{i}", "min_c": 26, "max_c": 33, "precip_mm": 2.0} for i in range(days)], "mock": True})
 
     place = _geocode(city)
     resp = httpx.get(
@@ -81,7 +99,7 @@ def get_forecast(city: str, days: int = 3) -> dict:
     )
     resp.raise_for_status()
     daily = resp.json()["daily"]
-    return {
+    return _result({
         "city": place["name"],
         "country": place.get("country"),
         "days": [
@@ -94,4 +112,4 @@ def get_forecast(city: str, days: int = 3) -> dict:
             }
             for i in range(len(daily["time"]))
         ],
-    }
+    })

@@ -14,8 +14,8 @@ dotnet publish "$GW/dotnet/Microsoft.McpGateway.Tools/src/Microsoft.McpGateway.T
 
 for s in weather-mcp hr-directory-mcp; do
   step "Building $s"
-  docker build -t "$REGISTRY/$s:1.0.0" "$REPO_ROOT/servers/$s"
-  docker push "$REGISTRY/$s:1.0.0"
+  docker build -t "$REGISTRY/$s:1.1.0" "$REPO_ROOT/servers/$s"
+  docker push "$REGISTRY/$s:1.1.0"
 done
 curl -s "http://$REGISTRY/v2/_catalog"; echo
 ok "images pushed"

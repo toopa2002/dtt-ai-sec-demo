@@ -1,43 +1,50 @@
-<section class="chat">
-  <div class="access" aria-label="Service access">
-    @for (s of services; track s) {
-      <span class="chip" [class.ok]="access()[s] === 'allowed'" [class.deny]="access()[s] === 'denied'" [class.warn]="access()[s] === 'unavailable'">
-        @switch (access()[s]) {
-          @case ('allowed') { ✅ }
-          @case ('denied') { 🔒 }
-          @case ('unavailable') { ⚠️ }
-          @default { · }
-        }
-        {{ s }}
-      </span>
-    }
-    <span class="hint">Access is decided per user by Entra app roles, enforced at the MCP Gateway.</span>
-  </div>
+<div class="layout" [class.panel-closed]="!panelOpen()">
+  <section class="chat">
+    <div class="access" aria-label="Service access">
+      @for (s of services; track s) {
+        <span class="chip" [class.ok]="access()[s] === 'allowed'" [class.deny]="access()[s] === 'denied'" [class.warn]="access()[s] === 'unavailable'">
+          @switch (access()[s]) {
+            @case ('allowed') { ✅ }
+            @case ('denied') { 🔒 }
+            @case ('unavailable') { ⚠️ }
+            @default { · }
+          }
+          {{ s }}
+        </span>
+      }
+      <span class="hint">Access is decided per user by Entra app roles, enforced at the MCP Gateway.</span>
+      <button type="button" class="toggle" (click)="panelOpen.set(!panelOpen())">
+        {{ panelOpen() ? 'Hide traffic' : 'Show traffic' }}
+      </button>
+    </div>
 
-  <div class="log" #log>
-    @if (messages().length === 0) {
-      <div class="empty">
-        <p>Try one of these:</p>
-        @for (e of examples; track e) {
-          <button type="button" (click)="send(e)">{{ e }}</button>
-        }
-      </div>
-    }
-    @for (m of messages(); track $index) {
-      <div class="msg" [class]="m.role">
-        <div class="bubble">{{ m.text }}</div>
-        @if (m.tools?.length) {
-          <div class="tools">tools used: {{ m.tools!.join(', ') }}</div>
-        }
-      </div>
-    }
-    @if (busy()) {
-      <div class="msg agent"><div class="bubble thinking">Thinking…</div></div>
-    }
-  </div>
+    <div class="log" #log>
+      @if (messages().length === 0) {
+        <div class="empty">
+          <p>Try one of these:</p>
+          @for (e of examples; track e) {
+            <button type="button" (click)="send(e)">{{ e }}</button>
+          }
+        </div>
+      }
+      @for (m of messages(); track m.id) {
+        <div class="msg" [class]="m.role" [class.selectable]="!!m.steps" [class.selected]="panelOpen() && isSelected(m)"
+             (click)="select(m)" [attr.title]="m.steps ? 'Show this request in the traffic panel' : null">
+          <div class="bubble" [class.thinking]="m.pending && !m.text">{{ m.pending && !m.text ? 'Thinking… (watch the traffic panel)' : m.text }}</div>
+          @if (m.tools?.length) {
+            <div class="tools">tools used: {{ m.tools!.join(', ') }}</div>
+          }
+        </div>
+      }
+    </div>
 
-  <form class="composer" (ngSubmit)="send()">
-    <input name="draft" [(ngModel)]="draft" placeholder="Ask about the weather or a colleague…" autocomplete="off" />
-    <button class="primary" type="submit" [disabled]="busy() || !draft.trim()">Send</button>
-  </form>
-</section>
+    <form class="composer" (ngSubmit)="send()">
+      <input name="draft" [(ngModel)]="draft" placeholder="Ask about the weather or a colleague…" autocomplete="off" />
+      <button class="primary" type="submit" [disabled]="busy() || !draft.trim()">Send</button>
+    </form>
+  </section>
+
+  @if (panelOpen()) {
+    <app-flow-diagram class="traffic" [steps]="panelSteps()" [live]="panelLive()" />
+  }
+</div>

@@ -12,7 +12,19 @@ for p in $PERSONAS; do
     uv run --quiet --no-cache --with-requirements requirements.txt python - <<'PY'
 import asyncio, json, os, types
 import agent
-ctx = types.SimpleNamespace(request_headers={"Authorization": "Bearer " + os.environ["TOKEN"]})
-print(json.dumps(asyncio.run(agent.invoke({"prompt": os.environ["PROMPT"]}, ctx)), indent=1, ensure_ascii=False))
+
+async def main():
+    ctx = types.SimpleNamespace(request_headers={"Authorization": "Bearer " + os.environ["TOKEN"]})
+    async for ev in agent.invoke({"prompt": os.environ["PROMPT"]}, ctx):
+        if ev.get("type") == "hop":
+            if ev["status"] == "start":
+                continue
+            target = f" [{ev['target']}]" if ev.get("target") else ""
+            print(f"  {ev['status']:<7} {ev['from']:>7} -> {ev['to']:<8}{target:<15} {ev['label']:<32} {ev.get('ms', ''):>5}ms  "
+                  + json.dumps(ev.get("detail", {}), ensure_ascii=False)[:220])
+        else:
+            print(json.dumps(ev, indent=1, ensure_ascii=False))
+
+asyncio.run(main())
 PY
 done

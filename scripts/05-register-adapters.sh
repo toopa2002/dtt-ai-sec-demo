@@ -8,9 +8,13 @@ for a in weather hr-directory; do
     -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data @"$REPO_ROOT/demo/adapter-$a.json")
   case "$code" in
     200|201) ok "created" ;;
-    409) warn "already exists; updating"
-         curl -sf -X PUT "$GATEWAY_LOCAL/adapters/$a" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
-           --data @"$REPO_ROOT/demo/adapter-$a.json" >/dev/null ;;
+    400|409)
+      grep -qi "already exist" "$RUN_DIR/register-$a.json" || { cat "$RUN_DIR/register-$a.json"; die "HTTP $code"; }
+      warn "already exists; updating"
+      code=$(curl -s -o "$RUN_DIR/register-$a.json" -w '%{http_code}' -X PUT "$GATEWAY_LOCAL/adapters/$a" \
+        -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data @"$REPO_ROOT/demo/adapter-$a.json")
+      [[ "$code" == 200 ]] || { cat "$RUN_DIR/register-$a.json"; die "update failed: HTTP $code"; }
+      ok "updated" ;;
     *) cat "$RUN_DIR/register-$a.json"; die "HTTP $code" ;;
   esac
 done

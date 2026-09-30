@@ -315,15 +315,35 @@ make chat       # chatbot on http://localhost:3000 (leave running)
 | 1 | "All MCP servers live behind one gateway." | `make demo` (steps 1–2) | Gateway, redis and toolgateway pods, plus `weather-0` and `hr-directory-0` created by the gateway |
 | 2 | "No token, no access. Roles decide per server." | `make demo` (step 3 table) | no token → 401; operator → 200/200; full → 200/200; weather-only → 200 / **403** on HR |
 | 3 | "You can't bypass the gateway, even from inside the cluster." | `make verify` | direct pod access blocked; no exposed services; every server is registered |
-| 4 | "Full access user." | Browser (private window) → sign in as `mcpdemo-full` → *"What's the weather in Bangkok, and who is Somchai's manager?"* | Both answered; chips ✅ weather ✅ hr-directory; footnote lists tools used |
+| 4 | "Full access user. Watch the traffic." | Browser (private window) → sign in as `mcpdemo-full` → *"What's the weather in Bangkok, and who is Somchai's manager?"* | Traffic panel lights up live: chatbot → Entra → agent → Entra (OBO) → gateway → **both** MCP servers, plus Bedrock turns. Both answered; chips ✅ weather ✅ hr-directory |
 | 5 | "Tools can chain." | *"What's the weather where Somchai lives?"* | HR lookup → Chiang Mai → weather |
-| 6 | "Same agent, less privilege." | Switch persona → `mcpdemo-weather-only`, same question | Weather answered, HR refused; chips ✅ weather 🔒 hr-directory |
+| 6 | "Same agent, less privilege: the gateway says no." | Switch persona → `mcpdemo-weather-only`, same question | In the panel, the gateway → hr-directory edge turns **red ✖ "403 blocked at gateway"**, while weather flows through. Weather answered, HR refused; chips ✅ weather 🔒 hr-directory |
+| 6b | "The MCP server never sees the user's token." | Click the `tools/call get_current_weather` step in the log | *"weather-0 received the call from the gateway as user … with roles [mcp.weather.user]. Authorization header received: **no (stripped by gateway)**"* |
 | 7 | "The agent can't escalate." | `mcpdemo-agent-only` | "You don't have access to any MCP services" |
 | 8 | "No assignment, no app." | `mcpdemo-none` | Access denied page (AADSTS50105) |
 | 9 | "Revoke live, no redeploy." | `python3 scripts/entra.py revoke <full-upn> gateway:mcp.hr.user`, then sign out and back in as `mcpdemo-full`, ask again | HR now 🔒. Restore with `grant`. |
 | 10 | "Who accessed the PII?" | `kubectl -n adapter logs hr-directory-0 \| grep hr-audit` | One audit line per HR tool call, with the user id and roles forwarded by the gateway |
 
 `make demo` saves a transcript to `out/demo-run.md`.
+
+### 5.4a Live traffic panel
+
+The right-hand side of the chatbot shows every request as it happens. The agent streams one event per step, and each step lights up the matching edge:
+
+| Edge | What travels over it |
+|---|---|
+| Chatbot → Entra ID | The browser gets token #1 for the agent API (MSAL, usually from its cache) |
+| Chatbot → AgentCore agent | `POST /invocations` with token #1. The step shows the token's claims: aud, azp, roles |
+| AgentCore agent → Entra ID | The on-behalf-of exchange for token #2 (gateway API). The step shows the user's gateway roles |
+| AgentCore agent → Bedrock | One `messages.create` per model turn. The step shows the tools Claude asked for and the token counts |
+| AgentCore agent → MCP Gateway | `GET /adapters/<name>` permission checks (200, or **403 denied**), MCP `initialize`/`tools/list`, and `tools/call` |
+| MCP Gateway → weather / hr-directory | Traffic the gateway forwarded to an MCP server. A denied check leaves this edge **red ✖** and marks the server "403 blocked at gateway" |
+
+**Colours:** blue with a moving dot means the call is in flight; green means OK (the small number counts calls); red means denied; amber means error. Click any step in the log to see its details.
+
+For `tools/call` steps, the log also shows what the **MCP server itself** reported receiving from the gateway: its pod name, the user id and roles the gateway forwarded, and that no `Authorization` header arrived. **Replay** re-animates the selected answer, and clicking an earlier answer in the chat shows its traffic.
+
+The panel never shows tokens or secrets. It shows only whitelisted claims (`aud`, `azp`, `roles`, `scp`, `preferred_username`) and tool arguments and results cut to 300 characters.
 
 ### 5.5 Managing access
 

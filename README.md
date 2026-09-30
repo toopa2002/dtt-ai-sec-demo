@@ -61,7 +61,7 @@ After a reboot: `make tunnel` (and `make chat`).
 1. `make demo` shows the gateway, the gateway-managed MCP pods and the direct-call matrix
    (no token → 401, weather-only on HR → 403, …); transcript in `out/demo-run.md`.
 2. `make verify` proves direct pod access is blocked and every MCP server is gateway-registered.
-3. Open http://localhost:3000 in a private window and sign in as each persona. Ask:
+3. Open http://localhost:3000 in a private window and sign in as each persona. The **traffic panel** on the right shows each hop live (chatbot → Entra → agent → gateway → MCP server, plus Bedrock); see the guide §5.4a. Ask:
    - "What's the weather in Bangkok, and who is Somchai's manager?"
    - "What's the weather where Somchai lives?" (HR tool, then weather tool)
 4. Live revocation: `python3 scripts/entra.py revoke <full-upn> gateway:mcp.hr.user`,
