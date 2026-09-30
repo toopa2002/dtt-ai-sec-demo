@@ -1,0 +1,13 @@
+.env
+.personas.local
+.run/
+out/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+deployment/*.rendered.yml
+chatbot/.angular/
+chatbot/dist/
+agent/.bedrock_agentcore.yaml
+agent/.bedrock_agentcore/

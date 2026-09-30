@@ -1,0 +1,19 @@
+:host { flex: 1; display: flex; min-height: 0; }
+.chat { flex: 1; display: flex; flex-direction: column; max-width: 860px; margin: 0 auto; width: 100%; padding: 1rem; min-height: 0; }
+.access { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+.chip { padding: 0.2rem 0.65rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 0.85rem; }
+.chip.ok { border-color: var(--ok); color: var(--ok); }
+.chip.deny { border-color: var(--deny); color: var(--deny); }
+.chip.warn { border-color: #b7791f; color: #b7791f; }
+.hint { color: var(--muted); font-size: 0.8rem; }
+.log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem 0; }
+.empty { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; color: var(--muted); }
+.msg { display: flex; flex-direction: column; max-width: 80%; }
+.msg.user { align-self: flex-end; align-items: flex-end; }
+.bubble { padding: 0.6rem 0.85rem; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); white-space: pre-wrap; }
+.msg.user .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
+.msg.error .bubble { border-color: var(--deny); color: var(--deny); }
+.thinking { color: var(--muted); font-style: italic; }
+.tools { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+.composer { display: flex; gap: 0.5rem; padding-top: 0.75rem; }
+.composer input { flex: 1; font: inherit; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }

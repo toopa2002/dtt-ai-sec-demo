@@ -1,0 +1,225 @@
+{
+  "_notice": "FAKE DEMO DATA - all people, emails and phone numbers are synthetic.",
+  "employees": [
+    {
+      "employee_id": "E1001",
+      "name": "Anong Srisuk",
+      "email": "anong.srisuk@example.com",
+      "phone": "+66-555-0101",
+      "department": "Executive",
+      "title": "Chief Executive Officer",
+      "manager": null,
+      "salary_band": "E1",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1002",
+      "name": "Kittipong Wongsawat",
+      "email": "kittipong.wongsawat@example.com",
+      "phone": "+66-555-0102",
+      "department": "Engineering",
+      "title": "VP of Engineering",
+      "manager": "Anong Srisuk",
+      "salary_band": "E2",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1003",
+      "name": "Somchai Rattanakul",
+      "email": "somchai.rattanakul@example.com",
+      "phone": "+66-555-0103",
+      "department": "Engineering",
+      "title": "Senior Software Engineer",
+      "manager": "Kittipong Wongsawat",
+      "salary_band": "P4",
+      "home_city": "Chiang Mai"
+    },
+    {
+      "employee_id": "E1004",
+      "name": "Pimchanok Chaiyaporn",
+      "email": "pimchanok.chaiyaporn@example.com",
+      "phone": "+66-555-0104",
+      "department": "Engineering",
+      "title": "Software Engineer",
+      "manager": "Kittipong Wongsawat",
+      "salary_band": "P3",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1005",
+      "name": "Thanawat Boonmee",
+      "email": "thanawat.boonmee@example.com",
+      "phone": "+66-555-0105",
+      "department": "Engineering",
+      "title": "DevOps Engineer",
+      "manager": "Kittipong Wongsawat",
+      "salary_band": "P3",
+      "home_city": "Khon Kaen"
+    },
+    {
+      "employee_id": "E1006",
+      "name": "Emily Carter",
+      "email": "emily.carter@example.com",
+      "phone": "+66-555-0106",
+      "department": "Engineering",
+      "title": "Staff Engineer",
+      "manager": "Kittipong Wongsawat",
+      "salary_band": "P5",
+      "home_city": "Singapore"
+    },
+    {
+      "employee_id": "E1007",
+      "name": "Siriporn Kaewmanee",
+      "email": "siriporn.kaewmanee@example.com",
+      "phone": "+66-555-0107",
+      "department": "Human Resources",
+      "title": "HR Director",
+      "manager": "Anong Srisuk",
+      "salary_band": "M3",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1008",
+      "name": "Nattapong Suksawat",
+      "email": "nattapong.suksawat@example.com",
+      "phone": "+66-555-0108",
+      "department": "Human Resources",
+      "title": "HR Business Partner",
+      "manager": "Siriporn Kaewmanee",
+      "salary_band": "P3",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1009",
+      "name": "Laura Nguyen",
+      "email": "laura.nguyen@example.com",
+      "phone": "+66-555-0109",
+      "department": "Human Resources",
+      "title": "Recruiter",
+      "manager": "Siriporn Kaewmanee",
+      "salary_band": "P2",
+      "home_city": "Ho Chi Minh City"
+    },
+    {
+      "employee_id": "E1010",
+      "name": "Wichai Thongdee",
+      "email": "wichai.thongdee@example.com",
+      "phone": "+66-555-0110",
+      "department": "Finance",
+      "title": "CFO",
+      "manager": "Anong Srisuk",
+      "salary_band": "E2",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1011",
+      "name": "Malee Phromma",
+      "email": "malee.phromma@example.com",
+      "phone": "+66-555-0111",
+      "department": "Finance",
+      "title": "Financial Analyst",
+      "manager": "Wichai Thongdee",
+      "salary_band": "P3",
+      "home_city": "Phuket"
+    },
+    {
+      "employee_id": "E1012",
+      "name": "James O'Connor",
+      "email": "james.oconnor@example.com",
+      "phone": "+66-555-0112",
+      "department": "Finance",
+      "title": "Controller",
+      "manager": "Wichai Thongdee",
+      "salary_band": "M2",
+      "home_city": "Sydney"
+    },
+    {
+      "employee_id": "E1013",
+      "name": "Supaporn Intharaprasit",
+      "email": "supaporn.intharaprasit@example.com",
+      "phone": "+66-555-0113",
+      "department": "Sales",
+      "title": "Sales Director",
+      "manager": "Anong Srisuk",
+      "salary_band": "M3",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1014",
+      "name": "Arthit Chanthara",
+      "email": "arthit.chanthara@example.com",
+      "phone": "+66-555-0114",
+      "department": "Sales",
+      "title": "Account Executive",
+      "manager": "Supaporn Intharaprasit",
+      "salary_band": "P3",
+      "home_city": "Pattaya"
+    },
+    {
+      "employee_id": "E1015",
+      "name": "Hannah Schmidt",
+      "email": "hannah.schmidt@example.com",
+      "phone": "+66-555-0115",
+      "department": "Sales",
+      "title": "Account Executive",
+      "manager": "Supaporn Intharaprasit",
+      "salary_band": "P3",
+      "home_city": "Berlin"
+    },
+    {
+      "employee_id": "E1016",
+      "name": "Chaiwat Somboon",
+      "email": "chaiwat.somboon@example.com",
+      "phone": "+66-555-0116",
+      "department": "Security",
+      "title": "CISO",
+      "manager": "Anong Srisuk",
+      "salary_band": "E2",
+      "home_city": "Bangkok"
+    },
+    {
+      "employee_id": "E1017",
+      "name": "Kannika Rungroj",
+      "email": "kannika.rungroj@example.com",
+      "phone": "+66-555-0117",
+      "department": "Security",
+      "title": "Security Analyst",
+      "manager": "Chaiwat Somboon",
+      "salary_band": "P3",
+      "home_city": "Hat Yai"
+    },
+    {
+      "employee_id": "E1018",
+      "name": "Daniel Park",
+      "email": "daniel.park@example.com",
+      "phone": "+66-555-0118",
+      "department": "Security",
+      "title": "Cloud Security Engineer",
+      "manager": "Chaiwat Somboon",
+      "salary_band": "P4",
+      "home_city": "Seoul"
+    },
+    {
+      "employee_id": "E1019",
+      "name": "Rattana Meesuk",
+      "email": "rattana.meesuk@example.com",
+      "phone": "+66-555-0119",
+      "department": "Operations",
+      "title": "Operations Manager",
+      "manager": "Anong Srisuk",
+      "salary_band": "M2",
+      "home_city": "Udon Thani"
+    },
+    {
+      "employee_id": "E1020",
+      "name": "Priya Sharma",
+      "email": "priya.sharma@example.com",
+      "phone": "+66-555-0120",
+      "department": "Operations",
+      "title": "Project Coordinator",
+      "manager": "Rattana Meesuk",
+      "salary_band": "P2",
+      "home_city": "Bangalore"
+    }
+  ]
+}

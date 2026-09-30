@@ -1,0 +1,7 @@
+{
+  "operator":     ["gateway:mcp.admin"],
+  "full":         ["chatbot:default", "agent:Agent.Invoke", "gateway:mcp.weather.user", "gateway:mcp.hr.user"],
+  "weather-only": ["chatbot:default", "agent:Agent.Invoke", "gateway:mcp.weather.user"],
+  "agent-only":   ["chatbot:default", "agent:Agent.Invoke"],
+  "none":         []
+}

@@ -1,0 +1,13 @@
+# Upstream local Redis keeps data only in memory: a node/WSL restart wipes every
+# registered adapter. Give it a volume (k3s local-path) and append-only persistence.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: adapter
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

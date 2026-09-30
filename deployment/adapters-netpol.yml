@@ -1,0 +1,21 @@
+# Replaces upstream `adapter-access` (which also admits toolgateway):
+# MCP adapter pods accept traffic ONLY from the MCP Gateway pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: adapter-access
+  namespace: adapter
+spec:
+  podSelector:
+    matchLabels:
+      adapter/type: mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcpgateway
+      ports:
+        - protocol: TCP
+          port: 8000

@@ -1,0 +1,15 @@
+# The gateway probes Redis once at startup and silently falls back to in-memory
+# storage if it isn't reachable. Block startup until Redis answers.
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command: ["sh", "-c", "until redis-cli -h redis-service -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG; do echo waiting for redis; sleep 2; done"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password

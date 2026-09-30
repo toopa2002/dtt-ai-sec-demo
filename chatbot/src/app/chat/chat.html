@@ -1,0 +1,43 @@
+<section class="chat">
+  <div class="access" aria-label="Service access">
+    @for (s of services; track s) {
+      <span class="chip" [class.ok]="access()[s] === 'allowed'" [class.deny]="access()[s] === 'denied'" [class.warn]="access()[s] === 'unavailable'">
+        @switch (access()[s]) {
+          @case ('allowed') { ✅ }
+          @case ('denied') { 🔒 }
+          @case ('unavailable') { ⚠️ }
+          @default { · }
+        }
+        {{ s }}
+      </span>
+    }
+    <span class="hint">Access is decided per user by Entra app roles, enforced at the MCP Gateway.</span>
+  </div>
+
+  <div class="log" #log>
+    @if (messages().length === 0) {
+      <div class="empty">
+        <p>Try one of these:</p>
+        @for (e of examples; track e) {
+          <button type="button" (click)="send(e)">{{ e }}</button>
+        }
+      </div>
+    }
+    @for (m of messages(); track $index) {
+      <div class="msg" [class]="m.role">
+        <div class="bubble">{{ m.text }}</div>
+        @if (m.tools?.length) {
+          <div class="tools">tools used: {{ m.tools!.join(', ') }}</div>
+        }
+      </div>
+    }
+    @if (busy()) {
+      <div class="msg agent"><div class="bubble thinking">Thinking…</div></div>
+    }
+  </div>
+
+  <form class="composer" (ngSubmit)="send()">
+    <input name="draft" [(ngModel)]="draft" placeholder="Ask about the weather or a colleague…" autocomplete="off" />
+    <button class="primary" type="submit" [disabled]="busy() || !draft.trim()">Send</button>
+  </form>
+</section>

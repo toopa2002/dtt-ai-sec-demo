@@ -1,0 +1,22 @@
+# Strategic-merge patch for the upstream `mcpgateway` Deployment.
+# Rendered by scripts/04-deploy.sh (envsubst) from values in .env.
+# Keeps the Development storage path (Redis) but switches authentication
+# to Entra ID - see patches/0001-entra-auth-in-development.patch.
+spec:
+  template:
+    spec:
+      containers:
+        - name: mcpgateway-container
+          env:
+            - name: Authentication__UseEntra
+              value: "true"
+            - name: AzureAd__Instance
+              value: "https://login.microsoftonline.com/"
+            - name: AzureAd__TenantId
+              value: "${TENANT_ID}"
+            - name: AzureAd__ClientId
+              value: "${GATEWAY_API_CLIENT_ID}"
+            - name: AzureAd__Audience
+              value: "${GATEWAY_API_CLIENT_ID}"
+            - name: PublicOrigin
+              value: "https://${NGROK_DOMAIN}/"

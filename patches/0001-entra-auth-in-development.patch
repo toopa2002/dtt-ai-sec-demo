@@ -1,0 +1,90 @@
+diff --git a/dotnet/Microsoft.McpGateway.Service/src/Controllers/PortalConfigController.cs b/dotnet/Microsoft.McpGateway.Service/src/Controllers/PortalConfigController.cs
+index 4074be4..2faf84d 100644
+--- a/dotnet/Microsoft.McpGateway.Service/src/Controllers/PortalConfigController.cs
++++ b/dotnet/Microsoft.McpGateway.Service/src/Controllers/PortalConfigController.cs
+@@ -42,7 +42,8 @@ namespace Microsoft.McpGateway.Service.Controllers
+                 // environment: the SPA skips MSAL and sends X-Dev-* headers
+                 // that the server's DevelopmentAuthenticationHandler reads.
+                 var bypassEntra = _configuration.GetValue<bool>("Authentication:BypassEntra");
+-                var isDevelopment = _environment.IsDevelopment() || bypassEntra;
++                var useEntraInDevelopment = _configuration.GetValue<bool>("Authentication:UseEntra");
++                var isDevelopment = (_environment.IsDevelopment() && !useEntraInDevelopment) || bypassEntra;
+ 
+                 var azureAdSection = _configuration.GetSection("AzureAd");
+                 var tenantId = azureAdSection["TenantId"];
+diff --git a/dotnet/Microsoft.McpGateway.Service/src/Program.cs b/dotnet/Microsoft.McpGateway.Service/src/Program.cs
+index 59b5fcc..b2bcf65 100644
+--- a/dotnet/Microsoft.McpGateway.Service/src/Program.cs
++++ b/dotnet/Microsoft.McpGateway.Service/src/Program.cs
+@@ -36,7 +36,11 @@ builder.Services.AddSingleton<ISessionRoutingHandler, AdapterSessionRoutingHandl
+ // clusters that aren't reachable from the public internet. Always-on in
+ // Development as before.
+ var bypassEntra = builder.Configuration.GetValue<bool>("Authentication:BypassEntra");
+-var useDevAuth = builder.Environment.IsDevelopment() || bypassEntra;
++// `Authentication__UseEntra=true` keeps the Development storage path (Redis /
++// in-memory) but authenticates with Entra ID instead of the X-Dev-* headers,
++// for local clusters that are reachable from outside (e.g. through a tunnel).
++var useEntraInDevelopment = builder.Configuration.GetValue<bool>("Authentication:UseEntra");
++var useDevAuth = (builder.Environment.IsDevelopment() && !useEntraInDevelopment) || bypassEntra;
+ 
+ if (useDevAuth)
+ {
+@@ -50,6 +54,29 @@ if (useDevAuth)
+         .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(DevelopmentAuthenticationHandler.SchemeName, null);
+ }
+ 
++if (!useDevAuth)
++{
++    var azureAdConfig = builder.Configuration.GetSection("AzureAd");
++    builder.Services.AddAuthentication(options =>
++    {
++        options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
++        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
++    })
++    .AddScheme<McpAuthenticationOptions, McpSubPathAwareAuthenticationHandler>(
++        McpAuthenticationDefaults.AuthenticationScheme,
++        McpAuthenticationDefaults.DisplayName,
++    options =>
++    {
++        options.ResourceMetadata = new()
++        {
++            Resource = new Uri(builder.Configuration.GetValue<string>("PublicOrigin")!),
++            AuthorizationServers = { new Uri($"https://login.microsoftonline.com/{azureAdConfig["TenantId"]}/v2.0") },
++            ScopesSupported = [$"api://{azureAdConfig["ClientId"]}/.default"]
++        };
++    })
++    .AddMicrosoftIdentityWebApi(azureAdConfig);
++}
++
+ if (builder.Environment.IsDevelopment())
+ {
+ 
+@@ -94,28 +121,6 @@ if (builder.Environment.IsDevelopment())
+ }
+ else
+ {
+-    if (!useDevAuth)
+-    {
+-        var azureAdConfig = builder.Configuration.GetSection("AzureAd");
+-        builder.Services.AddAuthentication(options =>
+-        {
+-            options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
+-            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+-        })
+-        .AddScheme<McpAuthenticationOptions, McpSubPathAwareAuthenticationHandler>(
+-            McpAuthenticationDefaults.AuthenticationScheme,
+-            McpAuthenticationDefaults.DisplayName,
+-        options =>
+-        {
+-            options.ResourceMetadata = new()
+-            {
+-                Resource = new Uri(builder.Configuration.GetValue<string>("PublicOrigin")!),
+-                AuthorizationServers = { new Uri($"https://login.microsoftonline.com/{azureAdConfig["TenantId"]}/v2.0") },
+-                ScopesSupported = [$"api://{azureAdConfig["ClientId"]}/.default"]
+-            };
+-        })
+-        .AddMicrosoftIdentityWebApi(azureAdConfig);
+-    }
+ 
+     // Create CosmosClient with credential-based authentication
+     var cosmosConfig = builder.Configuration.GetSection("CosmosSettings");

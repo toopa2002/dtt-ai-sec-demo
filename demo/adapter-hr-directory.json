@@ -1,0 +1,7 @@
+{
+  "name": "hr-directory",
+  "imageName": "hr-directory-mcp",
+  "imageVersion": "1.0.0",
+  "description": "HR employee directory (FAKE DEMO DATA, contains PII fields)",
+  "requiredRoles": ["mcp.hr.user"]
+}

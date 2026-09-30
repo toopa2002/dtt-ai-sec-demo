@@ -1,0 +1,12 @@
+<header>
+  <div class="brand">🔐 MCP Gateway demo <span class="sub">Entra ID → AgentCore → MCP Gateway</span></div>
+  @if (user()) {
+    <div class="who">
+      <span>{{ user() }}</span>
+      <button type="button" (click)="switchPersona()">Switch persona</button>
+    </div>
+  }
+</header>
+<main>
+  <router-outlet />
+</main>

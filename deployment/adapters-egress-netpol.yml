@@ -1,0 +1,50 @@
+# Egress control for gateway-managed MCP servers.
+# weather: DNS + HTTPS only (Open-Meteo). Plain NetworkPolicy can't filter by
+# domain, so HTTPS is allowed to public addresses but not to cluster/private ranges.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: weather-egress
+  namespace: adapter
+spec:
+  podSelector:
+    matchLabels:
+      adapter/name: weather
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# hr-directory holds PII: no egress at all (it can only answer the gateway).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hr-directory-no-egress
+  namespace: adapter
+spec:
+  podSelector:
+    matchLabels:
+      adapter/name: hr-directory
+  policyTypes:
+    - Egress
+  egress: []

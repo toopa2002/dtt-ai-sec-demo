@@ -1,0 +1,16 @@
+spec:
+  strategy:
+    type: Recreate          # RWO volume: never run two Redis pods at once
+    rollingUpdate: null
+  template:
+    spec:
+      containers:
+        - name: redis
+          command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)", "--appendonly", "yes", "--dir", "/data"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: redis-data

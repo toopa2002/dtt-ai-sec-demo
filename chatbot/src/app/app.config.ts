@@ -1,0 +1,69 @@
+import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
+import {
+  BrowserCacheLocation,
+  InteractionType,
+  IPublicClientApplication,
+  PublicClientApplication,
+} from '@azure/msal-browser';
+import {
+  MSAL_GUARD_CONFIG,
+  MSAL_INSTANCE,
+  MSAL_INTERCEPTOR_CONFIG,
+  MsalBroadcastService,
+  MsalGuard,
+  MsalGuardConfiguration,
+  MsalInterceptor,
+  MsalInterceptorConfiguration,
+  MsalService,
+} from '@azure/msal-angular';
+import { routes } from './app.routes';
+
+export interface RuntimeConfig {
+  tenantId: string;
+  chatClientId: string;
+  agentApiClientId: string;
+}
+
+export const AGENT_PATH = '/api/agent';
+
+export function buildAppConfig(config: RuntimeConfig): ApplicationConfig {
+  const agentScope = `api://${config.agentApiClientId}/access_as_user`;
+
+  const msalInstance: IPublicClientApplication = new PublicClientApplication({
+    auth: {
+      clientId: config.chatClientId,
+      authority: `https://login.microsoftonline.com/${config.tenantId}`,
+      redirectUri: window.location.origin + '/',
+      postLogoutRedirectUri: window.location.origin + '/',
+    },
+    cache: { cacheLocation: BrowserCacheLocation.SessionStorage },
+  });
+
+  const guardConfig: MsalGuardConfiguration = {
+    interactionType: InteractionType.Redirect,
+    authRequest: { scopes: [agentScope], prompt: 'select_account' },
+  };
+
+  // The interceptor attaches the agent-API token (token #1) to every call to the agent proxy.
+  const interceptorConfig: MsalInterceptorConfiguration = {
+    interactionType: InteractionType.Redirect,
+    protectedResourceMap: new Map([[window.location.origin + AGENT_PATH, [agentScope]]]),
+  };
+
+  return {
+    providers: [
+      provideBrowserGlobalErrorListeners(),
+      provideRouter(routes),
+      provideHttpClient(withInterceptorsFromDi()),
+      { provide: HTTP_INTERCEPTORS, useClass: MsalInterceptor, multi: true },
+      { provide: MSAL_INSTANCE, useValue: msalInstance },
+      { provide: MSAL_GUARD_CONFIG, useValue: guardConfig },
+      { provide: MSAL_INTERCEPTOR_CONFIG, useValue: interceptorConfig },
+      MsalService,
+      MsalGuard,
+      MsalBroadcastService,
+    ],
+  };
+}

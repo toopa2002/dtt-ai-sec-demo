@@ -1,0 +1,8 @@
+{
+  "name": "weather",
+  "imageName": "weather-mcp",
+  "imageVersion": "1.0.0",
+  "description": "Weather MCP server (Open-Meteo)",
+  "environmentVariables": { "WEATHER_MOCK": "0" },
+  "requiredRoles": ["mcp.weather.user"]
+}
