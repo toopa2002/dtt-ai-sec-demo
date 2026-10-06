@@ -235,7 +235,8 @@ def setup(create: bool) -> None:
     print("exposing APIs, roles, SPA redirect, permissions:")
     expose_api("gateway", gw_app)
     expose_api("agent", ag_app)
-    az("PATCH", f"/applications/{cb_app['id']}", {"spa": {"redirectUris": ["http://localhost:3000/"]}})
+    az("PATCH", f"/applications/{cb_app['id']}", {"spa": {"redirectUris": [
+        "http://localhost:3000/mcp/", f"https://{env['NGROK_DOMAIN']}/mcp/"]}})
     az("PATCH", f"/applications/{cli_app['id']}", {
         "isFallbackPublicClient": True,
         "publicClient": {"redirectUris": ["http://localhost"]},

@@ -2,8 +2,22 @@ import { inject, Injectable } from '@angular/core';
 import { MsalService } from '@azure/msal-angular';
 import { AccountInfo, InteractionRequiredAuthError } from '@azure/msal-browser';
 import { Observable } from 'rxjs';
-import { AGENT_PATH, AGENT_SCOPE } from './app.config';
-import { AgentEvent, HopEvent } from './flow.model';
+import { AGENT_SCOPE, AGENT_URL } from './app.config';
+import { AgentEvent, Engine, HopEvent, HttpExchange } from './flow.model';
+
+const CLAIMS_SHOWN = ['aud', 'azp', 'roles', 'scp', 'preferred_username'];
+
+/** The whitelisted claims of a JWT (the token itself is never shown). */
+function claimsOf(jwt: string): Record<string, unknown> {
+  try {
+    const payload = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return Object.fromEntries(CLAIMS_SHOWN.filter((k) => k in payload).map((k) => [k, payload[k]]));
+  } catch {
+    return {};
+  }
+}
+
+const short = (text: string) => (text.length > 300 ? text.slice(0, 300) + '…' : text);
 
 /**
  * Streams the agent's events (server-sent events from AgentCore) and adds the
@@ -25,7 +39,7 @@ export class AgentService {
     this.sessionId = AgentService.newSessionId();
   }
 
-  ask(prompt: string): Observable<AgentEvent> {
+  ask(prompt: string, engine: Engine): Observable<AgentEvent> {
     return new Observable<AgentEvent>((subscriber) => {
       const abort = new AbortController();
       const emit = (ev: AgentEvent) => subscriber.next(ev);
@@ -39,7 +53,18 @@ export class AgentService {
 
         const invoke = hop('invoke', 'chatbot', 'agent', 'POST /invocations');
         emit(invoke.start());
-        const response = await fetch(window.location.origin + AGENT_PATH, {
+        const sent: HttpExchange['request'] = {
+          method: 'POST',
+          url: AGENT_URL,
+          headers: {
+            'content-type': 'application/json',
+            accept: 'text/event-stream',
+            'x-amzn-bedrock-agentcore-runtime-session-id': this.sessionId,
+            authorization: 'Bearer <token #1>',
+          },
+          body: short(JSON.stringify({ prompt, engine })),
+        };
+        const response = await fetch(AGENT_URL, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -47,20 +72,30 @@ export class AgentService {
             Accept: 'text/event-stream',
             'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': this.sessionId,
           },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, engine }),
           signal: abort.signal,
         });
 
+        const received = (body: string | null): HttpExchange => ({
+          request: sent,
+          response: {
+            status: response.status,
+            headers: { 'content-type': response.headers.get('content-type') ?? '' },
+            body,
+          },
+        });
         if (!response.ok) {
           const body = (await response.text()).slice(0, 300);
           const denied = response.status === 401 || response.status === 403;
-          emit(invoke.end(denied ? 'denied' : 'error', { http_status: response.status, body }));
+          emit(invoke.end(denied ? 'denied' : 'error', { http_status: response.status, body, http: [received(body)] }));
           emit({ type: 'error', message: `Request failed (${response.status})${denied ? ': the agent rejected your token' : ''}` });
           this.resetSession();
           subscriber.complete();
           return;
         }
 
+        // Still in flight (the agent ends this step); add the browser-side exchange to it.
+        emit({ ...invoke.start(), detail: { http: [received('(server-sent events, streamed below)')] } });
         for await (const ev of readEvents(response)) emit(ev);
         subscriber.complete();
       })().catch((err: unknown) => {
@@ -82,7 +117,24 @@ export class AgentService {
       this.msal.instance.getActiveAccount() ?? this.msal.instance.getAllAccounts()[0];
     try {
       const result = await this.msal.instance.acquireTokenSilent({ scopes: [this.scope], account });
-      emit(h.end('ok', { scope: this.scope, from_cache: result.fromCache }));
+      const auth = this.msal.instance.getConfiguration().auth;
+      const http: HttpExchange = {
+        request: {
+          method: result.fromCache ? '(MSAL cache)' : 'POST',
+          url: `${auth.authority}/oauth2/v2.0/token`,
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: result.fromCache
+            ? 'not sent: token #1 was still valid in the browser cache'
+            : `grant_type=refresh_token&client_id=${auth.clientId}&scope=${this.scope}&refresh_token=<refresh token>`,
+        },
+        response: {
+          status: result.fromCache ? 'cache' : 200,
+          headers: { 'content-type': 'application/json' },
+          body: short(JSON.stringify({ token_type: 'Bearer', access_token: '<token #1>', expires_on: result.expiresOn,
+            'token #1 claims': claimsOf(result.accessToken) })),
+        },
+      };
+      emit(h.end('ok', { scope: this.scope, from_cache: result.fromCache, http: [http] }));
       return result.accessToken;
     } catch (err) {
       emit(h.end('error', { scope: this.scope, error: err instanceof Error ? err.message : String(err) }));

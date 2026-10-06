@@ -1,21 +1,28 @@
-<div class="layout" [class.panel-closed]="!panelOpen()">
-  <section class="chat">
+<div class="layout" [class.chat-closed]="!chatOpen()">
+  <section class="chat" [hidden]="!chatOpen()">
     <div class="access" aria-label="Service access">
       @for (s of services; track s) {
         <span class="chip" [class.ok]="access()[s] === 'allowed'" [class.deny]="access()[s] === 'denied'" [class.warn]="access()[s] === 'unavailable'">
           @switch (access()[s]) {
-            @case ('allowed') { ✅ }
-            @case ('denied') { 🔒 }
-            @case ('unavailable') { ⚠️ }
+            @case ('allowed') { <svg class="icon" viewBox="0 0 24 24" aria-label="allowed"><path d="M5 12l5 5L20 7"></path></svg> }
+            @case ('denied') { <svg class="icon" viewBox="0 0 24 24" aria-label="denied"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg> }
+            @case ('unavailable') { <svg class="icon" viewBox="0 0 24 24" aria-label="unavailable"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg> }
             @default { · }
           }
           {{ s }}
         </span>
       }
-      <span class="hint">Access is decided per user by Entra app roles, enforced at the MCP Gateway.</span>
-      <button type="button" class="toggle" (click)="panelOpen.set(!panelOpen())">
-        {{ panelOpen() ? 'Hide traffic' : 'Show traffic' }}
-      </button>
+      @if (!phone()) { <button type="button" class="toggle" (click)="chatOpen.set(false)">Hide chat</button> }
+    </div>
+    <div class="controls">
+      <span class="engine" role="radiogroup" aria-label="Agent platform">
+        <span class="engine-label">Agent platform</span>
+        @for (e of engines; track e.id) {
+          <button type="button" role="radio" [attr.aria-checked]="engine() === e.id" [class.on]="engine() === e.id"
+                  [disabled]="busy()" [title]="e.title" (click)="setEngine(e.id)">{{ e.label }}</button>
+        }
+      </span>
+      <p class="hint">Access is decided per user by Entra app roles, enforced at the MCP Gateway.</p>
     </div>
 
     <div class="log" #log>
@@ -28,15 +35,25 @@
         </div>
       }
       @for (m of messages(); track m.id) {
-        <div class="msg" [class]="m.role" [class.selectable]="!!m.steps" [class.selected]="panelOpen() && isSelected(m)"
+        <div class="msg" [class]="m.role" [class.selectable]="!!m.steps" [class.selected]="isSelected(m)"
              (click)="select(m)" [attr.title]="m.steps ? 'Show this request in the traffic panel' : null">
           <div class="bubble" [class.thinking]="m.pending && !m.text">{{ m.pending && !m.text ? 'Thinking… (watch the traffic panel)' : m.text }}</div>
-          @if (m.tools?.length) {
-            <div class="tools">tools used: {{ m.tools!.join(', ') }}</div>
+          @if (m.tools?.length || (m.role !== 'user' && m.engine)) {
+            <div class="tools">
+              @if (m.role !== 'user' && m.engine) { <span class="via">{{ m.engine === 'bedrock-agent' ? 'Bedrock Agent' : 'AgentCore' }}</span> }
+              @if (m.tools?.length) { tools used: {{ m.tools!.join(', ') }} }
+            </div>
           }
         </div>
       }
     </div>
+
+    @if (phone() && panelSteps().length) {
+      <button type="button" class="traffic-toggle" (click)="trafficOpen.set(!trafficOpen())" [attr.aria-expanded]="trafficOpen()">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h4l3-7 4 14 3-7h2"></path></svg>
+        {{ trafficOpen() ? 'Hide traffic' : 'Show traffic · ' + panelSteps().length + ' steps' }}
+      </button>
+    }
 
     <form class="composer" (ngSubmit)="send()">
       <input name="draft" [(ngModel)]="draft" placeholder="Ask about the weather or a colleague…" autocomplete="off" />
@@ -44,7 +61,8 @@
     </form>
   </section>
 
-  @if (panelOpen()) {
-    <app-flow-diagram class="traffic" [steps]="panelSteps()" [live]="panelLive()" />
+  @if (showTraffic()) {
+  <app-flow-diagram class="traffic" [steps]="panelSteps()" [live]="panelLive()" [engine]="panelEngine()"
+                    [chatHidden]="!chatOpen()" (showChat)="chatOpen.set(true)" />
   }
 </div>

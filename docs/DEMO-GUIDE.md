@@ -62,7 +62,7 @@ flowchart LR
 
 | Component | Where | Role in the demo |
 |---|---|---|
-| Angular chatbot | WSL, `http://localhost:3000` | User interface. Signs the user in with MSAL, then calls the agent through the dev-server proxy using the agent-API token. |
+| Angular chatbot | WSL, `http://localhost:3000/mcp/` | User interface. Signs the user in with MSAL, then calls the agent through the dev-server proxy using the agent-API token. |
 | AgentCore agent | AWS `ap-southeast-1` | Validates the user's token, exchanges it on-behalf-of the user, calls Claude, and calls MCP tools through the gateway. |
 | Claude Haiku 4.5 | Amazon Bedrock | Picks which tools to call and writes the answer. Chosen as the cheapest current Claude model. |
 | MCP Gateway | k3s on WSL | The single entry point to all MCP servers. It authenticates Entra tokens, checks each adapter's `requiredRoles`, and deploys and routes MCP servers. |
@@ -112,7 +112,7 @@ flowchart LR
 sequenceDiagram
     autonumber
     actor U as User (browser)
-    participant CB as Angular chatbot<br/>(localhost:3000)
+    participant CB as Angular chatbot<br/>(localhost:3000/mcp/)
     participant E as Entra ID
     participant AC as AgentCore agent<br/>(ap-southeast-1)
     participant S as SSM
@@ -121,7 +121,7 @@ sequenceDiagram
     participant W as weather-0
     participant H as hr-directory-0
 
-    U->>CB: open http://localhost:3000
+    U->>CB: open http://localhost:3000/mcp/
     CB->>E: MSAL loginRedirect (scope agent-api/access_as_user)
     E-->>CB: token #1 (aud=agent-api, azp=chatbot, roles=[Agent.Invoke])
     U->>CB: ask question
@@ -206,7 +206,7 @@ sequenceDiagram
 ```mermaid
 flowchart TB
     subgraph WIN["Windows laptop"]
-        BROWSER["Browser<br/>http://localhost:3000"]
+        BROWSER["Browser<br/>http://localhost:3000/mcp/"]
         subgraph WSL["WSL2 (Ubuntu, systemd)"]
             NGROK["ngrok agent<br/>→ https://mutually-exotic-bonefish.ngrok-free.app"]
             PF["kubectl port-forward<br/>localhost:8000 → svc/mcpgateway-service"]
@@ -305,7 +305,7 @@ Before redeploying agent changes, run `make test-agent`. It runs `agent/agent.py
 
 ```bash
 make tunnel     # only after a reboot: port-forward + ngrok
-make chat       # chatbot on http://localhost:3000 (leave running)
+make chat       # chatbot on http://localhost:3000/mcp/ (leave running)
 ```
 
 ### 5.4 Demo script (about 15 minutes)
@@ -339,9 +339,22 @@ The right-hand side of the chatbot shows every request as it happens. The agent 
 | AgentCore agent → MCP Gateway | `GET /adapters/<name>` permission checks (200, or **403 denied**), MCP `initialize`/`tools/list`, and `tools/call` |
 | MCP Gateway → weather / hr-directory | Traffic the gateway forwarded to an MCP server. A denied check leaves this edge **red ✖** and marks the server "403 blocked at gateway" |
 
+**AgentCore Gateway mode** (`TOOLS_VIA=agentcore-gateway`, §5.8): an **AgentCore Gateways** node sits between the agent and the MCP Gateway, with an edge to Entra ID for the on-behalf-of exchange it now performs. The agent's steps go to that node, one `MCP initialize + tools/list` per server; a server the user may not use is answered with an authorization error, shown as **denied** with the server marked "403 blocked at gateway".
+
 **Colours:** blue with a moving dot means the call is in flight; green means OK (the small number counts calls); red means denied; amber means error. Click any step in the log to see its details.
 
 For `tools/call` steps, the log also shows what the **MCP server itself** reported receiving from the gateway: its pod name, the user id and roles the gateway forwarded, and that no `Authorization` header arrived. **Replay** re-animates the selected answer, and clicking an earlier answer in the chat shows its traffic.
+
+**Request / Response.** Opening a step shows its HTTP exchange(s): method and URL, a few headers (`content-type`, `accept`, MCP and AgentCore session headers), the body, the response status and the response body. `POST /invocations` shows both legs: what the browser sent and what the agent received. Calls made by libraries rather than raw HTTP — MSAL's token requests and Bedrock's SigV4-signed `invoke` — are described from their inputs and outputs. `Authorization` is always shown as `Bearer <token #1>` / `<token #2>` (or "AWS4-HMAC-SHA256 (agent execution role)"), next to that token's whitelisted claims.
+
+**Agent platform switch.** The chat bar has an *Agent platform* toggle — **AgentCore** (the AgentCore runtime runs the
+Claude loop itself) or **Bedrock Agent** (the Bedrock Agent `mcpdemo-tools-agent` plans and picks tools; the AgentCore
+runtime runs each tool with the user's token). The choice is sent with each question (`{"prompt", "engine"}`), so
+both can be compared without redeploying; the default comes from `AGENT_ENGINE`. Each answer is labelled with the
+platform it ran on, and the diagram follows the selected answer: Bedrock node = *Bedrock / Claude Haiku 4.5* with
+`messages.create` steps, or *Bedrock Agent / agent platform* with `InvokeAgent` steps (agent node = *tool runner*).
+
+**Who each node acts as.** Every node has an `as:` line (full identity on hover): the chatbot acts as the signed-in user; the agent as its IAM execution role, for that user; the AgentCore Gateways as `mcpdemo-agentcore-gateway-role`, exchanging the user's token (OBO); the MCP Gateway as the Entra app `mcpdemo-gateway-api`; the MCP servers as the user id and roles the MCP Gateway forwarded on the latest tool call. The chat column takes 1/3 of the screen and the traffic panel 2/3 (single column below 1100px).
 
 The panel never shows tokens or secrets. It shows only whitelisted claims (`aud`, `azp`, `roles`, `scp`, `preferred_username`) and tool arguments and results cut to 300 characters.
 
@@ -377,10 +390,95 @@ Changes apply the next time the user signs in, because Entra only puts roles int
 
 ```bash
 make down       # stop tunnel, delete k8s namespace (keeps Entra/AWS)
-make destroy    # also AgentCore runtime + SSM secret, Entra apps, k3s + registry
+make destroy    # also AgentCore runtime + AgentCore Gateway (if any) + SSM secret, Entra apps, k3s + registry
 ```
 
 Demo users are kept by `make destroy`. Delete the `mcpdemo-*` users in the Entra admin center if you no longer need them.
+
+### 5.8 AgentCore Gateway mode
+
+Puts AWS Bedrock AgentCore Gateways (one per MCP server) between the agent and the MCP Gateway, so the tools are visible to AWS
+and to governance tools that discover AgentCore gateways and their MCP targets (for example SailPoint Agentic
+Fabric's AWS SaaS connector).
+
+```mermaid
+flowchart LR
+    A[AgentCore agent] -- "token #1 (aud agent-api)" --> X[AgentCore Gateway per server<br/>mcpdemo-gw-weather, mcpdemo-gw-hr-directory<br/>CUSTOM_JWT: Entra v2]
+    X -- "OBO via credential provider<br/>(mcpdemo-agent-api secret)" --> E[Entra ID]
+    X -- "token #2 (aud gateway-api,<br/>user's mcp.* roles)" --> G[MCP Gateway<br/>gate 3 unchanged]
+    G --> W[weather]
+    G --> H[hr-directory]
+```
+
+| | Direct (default) | AgentCore Gateway mode |
+|---|---|---|
+| Who does the OBO exchange | the agent (MSAL, secret from SSM) | the AgentCore Gateway's Entra credential provider (same app and secret) |
+| What the agent sends | token #2 to the MCP Gateway | token #1 to each server's AgentCore Gateway |
+| Per-adapter access decision | agent probes `GET /adapters/<name>` | each gateway lists tools per user (`DYNAMIC` listing); a refused listing (authorization error = the MCP Gateway's 403) is denied |
+| Gate 3 (requiredRoles), header stripping, HR audit | MCP Gateway | unchanged: still the MCP Gateway, with the user's token |
+
+Set up and switch:
+
+```bash
+make agentcore-gw                         # scripts/agentcore-gateway.sh: provider, role, a gateway + target per server
+TOOLS_VIA=agentcore-gateway make test-agent   # test locally first
+TOOLS_VIA=agentcore-gateway make agent    # redeploy the agent on the new route (remembered in .env)
+TOOLS_VIA=mcp-gateway make agent          # back to the direct route
+```
+
+What `scripts/agentcore-gateway.sh` creates (ap-southeast-1):
+
+- OAuth2 credential provider `mcpdemo-entra-obo` (vendor Microsoft, client = `mcpdemo-agent-api`, secret copied from
+  SSM `/mcpdemo/agent-obo-secret` — rerun the script after rotating that secret).
+- IAM role `mcpdemo-agentcore-gateway-role`, assumable only by AgentCore for the `mcpdemo-gw-*` gateways, allowed to
+  fetch workload and OAuth tokens and read the provider's secret.
+- Gateways `mcpdemo-gw-weather` and `mcpdemo-gw-hr-directory` (MCP, inbound CUSTOM_JWT on the Entra v2 issuer,
+  audience `mcpdemo-agent-api`), tagged with the agent runtime ARN. Their URLs go to `AGENTCORE_GATEWAY_URLS` in `.env`.
+- One MCP server target per gateway, named after the server, pointing at `https://$NGROK_DOMAIN/mcp/gw/adapters/<name>/mcp`
+  with OAuth `TOKEN_EXCHANGE` to `api://<gateway-api>/access_as_user`. Listing is `DYNAMIC` because the default
+  background sync uses an app-only token, which the MCP Gateway rejects (its roles are user roles).
+
+**Inbound gateway in front of the agent.** The script also creates `mcpdemo-gw-agent`, a gateway *without* a
+protocol type (AgentCore Runtime targets can't sit on MCP gateways) with one target, `mcpdemo-agent`
+(`http.agentcoreRuntime` → the `mcpdemo_agent` runtime, `DEFAULT` endpoint), and writes its URL to
+`AGENT_GATEWAY_URL`. Set `AGENT_VIA=agentcore-gateway` in `.env` and restart `make chat`: the dev-server proxy then
+sends `/api/agent` to `AGENT_GATEWAY_URL/invocations`. Outbound auth is token passthrough — the gateway validates
+token #1 (same Entra issuer and audience) and forwards it unchanged, so gate 2 (runtime JWT authorizer + the agent's
+`azp`/`Agent.Invoke` checks) is unchanged; requests and SSE responses are forwarded as-is. A rejected token shows as
+a denial on the chatbot → AgentCore Gateway edge; a denial by the agent shows on AgentCore Gateway → agent.
+The runtime can still be called directly too; AWS supports restricting a JWT runtime to its gateway
+(`allowedWorkloadConfiguration` on the runtime's authorizer), which this demo does not set.
+
+**Bedrock Agent engine (`AGENT_ENGINE=bedrock-agent`).** `make bedrock-agent` creates `mcpdemo-tools-agent`
+(Claude Haiku 4.5, role `mcpdemo-tools-agent-role`, alias `live`) with one action group per MCP server —
+`weather-mcp`, `hr-directory-mcp`, functions generated from the servers' source — all **RETURN_CONTROL**. mcpdemo_agent
+lists each server's tools through its AgentCore Gateway as before (so access is still decided per user), then calls
+`InvokeAgent`; when the Bedrock Agent picks a tool it returns the call instead of running a Lambda, mcpdemo_agent runs
+it with the user's token, and sends the result back in the next `InvokeAgent` (`returnControlInvocationResults`).
+A service the user may not use is answered "no access" without calling it. The traffic panel shows the Bedrock node as
+**Bedrock Agent** with one `InvokeAgent (turn N)` step per round. SailPoint (AWS Bedrock dataset) lists the action
+groups as the agent's **Tools** — which it does not do for AgentCore runtimes.
+
+**Declared tools.** The script also declares, in AWS, which MCP servers and tools the agent uses — read from the
+servers' source by `scripts/agent_capabilities.py`, so it can't drift from the deployed tools:
+- the inbound target `mcpdemo-agent` gets an OpenAPI schema for `/invocations` whose description and `x-mcp-servers`
+  section list each server, its AgentCore Gateway ARN and its tools (`get-gateway-target` shows it);
+- the agent runtime is tagged `mcp:servers`, `mcp:tools` and `mcp:gateways`; each MCP gateway is tagged `mcp:server`
+  and `mcp:tools`.
+These are declarations for governance and inventory; what a given user can actually call is still decided per
+request by the MCP Gateway's roles.
+
+Why one gateway per server: a gateway with several targets returns `tools/list` one target per page, ordered by
+(random) target id, and answers a target the user may not use with an error that has no next-page cursor — so one
+denied server would hide every server listed after it. With one target per gateway, each server's access decision
+stands on its own.
+
+Notes:
+
+- The MCP Gateway and tunnel must be up (`make tunnel`) for tool calls; the AgentCore resources can be created while
+  they are down.
+- The MCP servers are still reachable only through the MCP Gateway; `make verify` is unchanged.
+- `scripts/agentcore-gateway.sh --delete` removes everything it created; `make destroy` calls it.
 
 ---
 

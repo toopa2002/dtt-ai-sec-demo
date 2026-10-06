@@ -17,6 +17,7 @@ if ! kubectl -n "$NS" get secret redis-secret -o jsonpath='{.metadata.annotation
 fi
 
 step "Switching the gateway to Entra auth"
+export GATEWAY_PUBLIC   # PublicOrigin in the patch
 python3 -c 'import os,sys; sys.stdout.write(os.path.expandvars(open(sys.argv[1]).read()))' \
   "$REPO_ROOT/deployment/entra-patch.yml.tmpl" > "$REPO_ROOT/deployment/entra-patch.rendered.yml"
 kubectl -n "$NS" patch deployment mcpgateway --patch-file "$REPO_ROOT/deployment/entra-patch.rendered.yml"
