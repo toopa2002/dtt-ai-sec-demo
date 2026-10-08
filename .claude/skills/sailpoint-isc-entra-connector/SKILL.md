@@ -43,7 +43,8 @@ a template rather than the scripts when the user wants something different.
   `app-role-assignment.tmpl.json`, `oauth2-permission-grant.tmpl.json`, `directory-roles.json`,
   `role-assignment.tmpl.json`, `azure-rbac.json`
 - ISC: `assets/isc/source-create.tmpl.json`, `source-configure.patch.tmpl.json`, `feature-toggles.json`,
-  `aggregate-datasets.tmpl.json`, `provisioning-policy-create.tmpl.json`, `correlation-config.tmpl.json`,
+  `aggregate-datasets.tmpl.json`, `account-schema-spn-attributes.json`, `provisioning-policy-create.tmpl.json`,
+  `correlation-config.tmpl.json`,
   `lifecycle-state-account-actions.patch.tmpl.json`, `schedule.tmpl.json`
 
 ## Permission profiles
@@ -52,10 +53,10 @@ a template rather than the scripts when the user wants something different.
 
 | Profile | Entra side | ISC side (toggles) |
 |---|---|---|
-| `readonly` | Graph User.Read.All, Group.Read.All, Organization.Read.All, RoleManagement.Read.Directory, Application.Read.All, AuditLog.Read.All | — |
+| `readonly` | Graph User.Read.All, Group.Read.All, Organization.Read.All, RoleManagement.Read.Directory, Application.Read.All, AuditLog.Read.All | base: all groups (incl. M365), delta aggregation, page size 100; Teams, access packages, managed identities off |
 | `provisioning` | + User/Group ReadWrite, invite, enable/disable, password profile, role + app-role assignment write; **User Administrator** role | CREATE provisioning policy (`provisioning-policy`) |
-| `machine-identity` | Application.Read.All, DelegatedPermissionGrant.Read.All, Device.Read.All | manageAzureServicePrincipalAsAccount, managed identities |
-| `ai-agents` | Application.Read.All, Azure Service Management user_impersonation (delegated); Azure RBAC (Reader + Cognitive Services Data Contributor) on `--foundry-subscriptions` | enableAIFoundryAgent on → `azure:foundry` dataset; Copilot Studio / Agent 365 toggles set **off** (they need extra setup) |
+| `machine-identity` | Application.Read.All, DelegatedPermissionGrant.Read.All, Device.Read.All, CustomSecAttribute{Assignment,Definition}.Read.All | service principals as accounts (filter `servicePrincipalType eq 'Application'`) + their role/app-role/group/role-assignment/admin-consent/custom-attribute memberships; SP PIM off |
+| `ai-agents` | Application.Read.All, Azure Service Management user_impersonation (delegated); Azure RBAC (Reader + Cognitive Services Data Contributor) on `--foundry-subscriptions` | Foundry agents (latest version only) + Copilot Studio agents on; Agent 365 off (needs a user refresh token) |
 | `exchange` | Exchange Online Exchange.ManageAsApp; **Exchange Administrator** role; cert via `--exchange-cert` | manageExchangeOnline, aggregateAllGroups, cert |
 | `teams` | Teams/channel/app read set | enableTeamsGovernance |
 | `pim` | PIM-for-Groups + directory role schedule reads | enablePIM, spnManageAzureADPIM |
@@ -133,9 +134,14 @@ Notes per step:
 6. **configure** uses the tenant's initial `*.onmicrosoft.com` domain (custom domains aren't supported for CIEM), the
    **Application (client) ID**, the secret **Value** (a GUID in the secret file is the secret's ID and is rejected)
    and `grantType` `CLIENT_CREDENTIALS`. It adds each profile's toggles from `feature-toggles.json`, skipping (and
-   reporting) any the tenant's form doesn't have.
+   reporting) any the tenant's form doesn't have. For `machine-identity` it also adds the service-principal
+   attributes to the account schema (`schema-spn`, from `assets/isc/account-schema-spn-attributes.json`): the UI
+   does that when the toggle is switched on, the API doesn't, and without them no service principal is aggregated.
 7. **verify = peek → test → aggregate**, in that order, each only if the previous passed:
    - *peek* reads 5 accounts through the connector — proves app, consent, secret and domain against live data.
+     With Delta Aggregation on (the base setting), the connector only returns changes, so peek and a normal
+     account aggregation return nothing new; `verify` (and `aggregate --full`) switch delta off for that call and
+     back on afterwards — seen live.
    - *test* runs Test Connection on the whole source configuration. `Provided source configuration already
      exists` is a known connector issue (CIEM toggle workaround in `references/troubleshooting.md`).
    - *aggregate* runs **entitlements first, then accounts** (accounts then link to entitlements that already
@@ -167,7 +173,8 @@ secret), `--app-id` re-run (idempotent, added one grant), then `create` → `con
 test (SUCCESS), entitlement and account aggregation (SUCCESS) on v2026. Also checked live: connector name/scriptName/spec
 id, the form fields, `grantType` values and dataset ids. Dataset aggregation: `azure:foundry` aggregated live
 from the UI (2 AI-agent machine identities, counted with `GET /v2026/machine-identities`) and its schedule was
-turned on with the dataset PUT that `dataset-schedule` replays; that tenant answered the
+turned on with the dataset PUT that `dataset-schedule` replays; `machine-identity` with the screenshot-matched toggles
+plus `schema-spn` aggregated 161 service principals as accounts; that tenant answered the
 `aggregate-agents` API with 404 "endpoint is unavailable", so a successful scripted run is still unverified. The `ai-agents` Entra side (delegated consent, Reader + Cognitive Services Data Contributor) applied live
 fine. Not yet exercised live: the provisioning / Exchange / PIM profiles, `provisioning-policy` and `correlation`
 writes. Tell the user which of these a run relies on, and read errors literally.

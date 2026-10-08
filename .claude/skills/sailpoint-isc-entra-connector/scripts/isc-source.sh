@@ -33,15 +33,19 @@ Usage: isc-source.sh <subcommand> [options] [--apply | --plan-only]
             Prove it works: peek -> test -> aggregate, stopping at the first failure.
   peek      --source ID|NAME          Read a few accounts through the connector.
   test      --source ID|NAME          Run "Test Connection" (test-configuration).
-  aggregate --source ID|NAME [--only entitlement,account,dataset] [--datasets ID,ID] [--no-wait]
+  aggregate --source ID|NAME [--only entitlement,account,dataset] [--datasets ID,ID] [--full] [--no-wait]
             Entitlement, then account, then dataset (machine identity / AI agent) aggregation. Datasets default to
             the ones switched on on the source (enableAIFoundryAgent / enableCopilotAIAgent / enableMicrosoftAgent365).
+            --full: with Delta Aggregation on, run the account aggregation with delta switched off for that run (needed
+            after changing what is aggregated, e.g. service principals) and switch it back on afterwards. verify does this.
   datasets  --source ID|NAME          List the source's datasets (informational: this endpoint isn't in the
                                       published v2026 spec; aggregation uses the source toggles instead).
   dataset-schedule --source ID|NAME --on|--off [--datasets ID,ID]
             Turn a dataset's scheduled aggregation (UI "Enable Schedule") on or off. Default datasets: those switched
             on on the source. Uses PUT /v2026/sources/{id}/datasets/{datasetId} — the call the UI makes; it is not in
             the published v2026 spec, so treat it as undocumented (the schedule frequency is ISC's default).
+  schema-spn --source ID|NAME   Add the service-principal attributes (assets/isc/account-schema-spn-attributes.json)
+            to the account schema; configure runs it for the machine-identity profile.
   provisioning-policy --source ID|NAME --upn-domain D [--usage-location "United States;US"] [--replace]
             Create (or with --replace, overwrite) the CREATE provisioning policy for joiners.
   correlation --source ID|NAME        Set account correlation from assets/isc/correlation-config.tmpl.json.
@@ -59,7 +63,7 @@ CMD="$1"; shift
 CONNECTOR="" FROM_SOURCE="" NAME="" OWNER="" DESCRIPTION="Microsoft Entra source — managed via sailpoint-isc-entra-connector skill"
 SOURCE="" FROM_SETUP="" DOMAIN="" CLIENT_ID="" SECRET_FILE="" GRANT_TYPE="" PROFILES="" EXO_PFX="" EXO_PASS=""
 WAIT=1 CRON="" SCHED_TYPES="account,group" CLEAR=0 KEYMAP="" REUSE=0 OFFLINE=0
-ONLY="entitlement,account,dataset" DATASETS="" SCHED_ON="" UPN_DOMAIN="" USAGE_LOCATION="United States;US" REPLACE=0
+ONLY="entitlement,account,dataset" DATASETS="" SCHED_ON="" FULL=0 UPN_DOMAIN="" USAGE_LOCATION="United States;US" REPLACE=0
 while (($#)); do
   case "$1" in
     --connector) CONNECTOR="$2"; shift ;;
@@ -87,6 +91,7 @@ while (($#)); do
     --usage-location) USAGE_LOCATION="$2"; shift ;;
     --replace) REPLACE=1 ;;
     --no-wait) WAIT=0 ;;
+    --full) FULL=1 ;;
     --cron) CRON="$2"; shift ;;
     --types) SCHED_TYPES="$2"; shift ;;
     --clear) CLEAR=1 ;;
@@ -207,7 +212,9 @@ CANONICAL='["domainName","clientID","clientSecret","grantType",
   "aggregateAllGroups","aggregateGroupHierarchy","enablePIM","spnManageAzurePIM","spnManageAzureADPIM",
   "manageAzureServicePrincipalAsAccount","enableManagedIdentityManagement","enableSystemAssignedManagedIdentity",
   "enableAIFoundryAgent","enableCopilotAIAgent","enableMicrosoftAgent365","enableTeamsGovernance","enableCIEM",
-  "deltaAggregationEnabled","pageSize","manageO365Groups","enableAccessPackageManagement"]'
+  "deltaAggregationEnabled","pageSize","manageO365Groups","enableAccessPackageManagement","aggregateGroupHierarchy",
+  "spnAccountFilter","spnManageDirectoryRole","spnManageAppRoles","spnManageGroups","spnManageRBACRoles",
+  "manageAdminConsentedPermissions","manageCustomSecurityAttributesForServicePrincipals","foundryAggregateLatestVersionOnly"]'
 build_keymap() {  # stdin: JSON array of field names; $1 script, $2 connector name, $3 discovered via, $4 grantType values
   jq --arg script "$1" --arg cname "$2" --arg via "$3" --argjson gt "$4" --argjson canon "$CANONICAL" '
     def pick(f): (map(select(f)) | .[0]) // null;
@@ -370,7 +377,8 @@ cmd_configure() {
   ops="$(render_tmpl "$ASSETS/isc/source-configure.patch.tmpl.json" "$(jq -nc --arg d "$DOMAIN" --arg c "$CLIENT_ID" \
            --arg s "$secret" --arg g "$GRANT_TYPE" '{DOMAIN_NAME: $d, CLIENT_ID: $c, CLIENT_SECRET: $s, GRANT_TYPE: $g}')")"
   unset secret
-  toggles="$(jq -c --arg p "readonly,$PROFILES" '. as $t | [$p | split(",")[] | select(. != "")] | unique
+  # readonly (base settings) first, then the profiles in the order given; later profiles win on a shared key.
+  toggles="$(jq -c --arg p "readonly,$PROFILES" '. as $t | reduce ($p | split(",")[] | select(. != "")) as $n ([]; if index($n) then . else . + [$n] end)
                 | map(. as $n | if ($t | has($n)) then $t[$n] else error("unknown profile \($n)") end) | add // {}' \
                "$ASSETS/isc/feature-toggles.json")"
   ops="$(jq -c --argjson t "$toggles" '. + [$t | to_entries[] | {op: "add", path: "/connectorAttributes/\(.key)", value: .value}]' <<<"$ops")"
@@ -397,18 +405,40 @@ cmd_configure() {
   step "Configuring source $id (domain $DOMAIN, client $CLIENT_ID, grantType $GRANT_TYPE)"
   api PATCH "$API/sources/$id" "$ops" application/json-patch+json >/dev/null
   if (( APPLY )); then ok "source updated"; else warn "dry-run only; rerun with --apply"; fi
+  # The UI extends the account schema when service principals are switched on; the API doesn't, so do it here.
+  [[ ",$PROFILES," == *",machine-identity,"* ]] && cmd_schema_spn "$id"
+  (( APPLY )) && warn "settings changed: run verify (or aggregate --full) so the next account aggregation reads everything now in scope"
   if [[ ",$PROFILES," == *",ai-agents,"* ]]; then
-    warn "Copilot Studio / Agent 365 datasets need their own setup first (references/entra-permissions.md); then turn on enableCopilotAIAgent / enableMicrosoftAgent365 on the source"
+    warn "ai-agents turns on Copilot Studio agents too: the microsoft:copilot dataset only works once the app is an application user in each Power Platform environment (references/entra-permissions.md). Agent 365 stays off (needs a user refresh token)."
   fi
   return 0
 }
 
 cmd_show() { api GET "$API/sources/$(source_id "$SOURCE")" | redact_json; }
 
+# Delta Aggregation (deltaAggregationEnabled) makes the connector return only changes since the last run: peek
+# then returns nothing, and objects newly in scope (e.g. service principals after switching them on) are never
+# read. Seen live. delta_off/delta_restore wrap a call that needs the full set.
+DELTA_WAS_ON=0
+delta_off() {   # source id
+  (( APPLY )) || return 0
+  [[ "$(api GET "$API/sources/$1" | jq -r '.connectorAttributes.deltaAggregationEnabled // false | tostring')" == true ]] || return 0
+  DELTA_WAS_ON=1
+  api PATCH "$API/sources/$1" '[{"op":"replace","path":"/connectorAttributes/deltaAggregationEnabled","value":false}]' application/json-patch+json >/dev/null
+  warn "Delta Aggregation switched off for this run (it only returns changes); it is switched back on afterwards"
+}
+delta_restore() {
+  (( DELTA_WAS_ON )) || return 0
+  api PATCH "$API/sources/$1" '[{"op":"replace","path":"/connectorAttributes/deltaAggregationEnabled","value":true}]' application/json-patch+json >/dev/null
+  DELTA_WAS_ON=0; ok "Delta Aggregation switched back on"
+}
+
 cmd_peek() {
   local id; id="$(source_id "$SOURCE")"
   step "Peek accounts ($id)"
-  local r; r="$(api POST "$API/sources/$id/connector/peek-resource-objects" '{"objectType":"account","maxCount":5}')"
+  delta_off "$id"
+  local r; r="$(api POST "$API/sources/$id/connector/peek-resource-objects" '{"objectType":"account","maxCount":5}')" || { delta_restore "$id"; exit 1; }
+  delta_restore "$id"
   (( APPLY )) || { warn "dry-run: peek not run (it's a POST, but read-only; add --apply)"; return 0; }
   local n; n="$(jq '.resourceObjects // [] | length' <<<"$r")"
   jq -r '.resourceObjects // [] | .[] | "  " + (.identity // .name)' <<<"$r" >&2
@@ -469,8 +499,14 @@ cmd_aggregate() {
         if (( APPLY )); then ok "entitlement aggregation task ${ent:-?}"; (( WAIT )) && [[ -n "$ent" ]] && { wait_task "$ent" "entitlement aggregation" || rc=1; }; fi ;;
       account)
         step "Account aggregation ($id)"
+        if (( FULL )); then delta_off "$id"
+        elif (( APPLY )) && [[ "$(api GET "$API/sources/$id" | jq -r '.connectorAttributes.deltaAggregationEnabled // false | tostring')" == true ]]; then
+          warn "Delta Aggregation is on: this run only picks up changes. After changing what is aggregated, use --full"
+        fi
         local acct; acct="$(api POST "$API/sources/$id/load-accounts" "disableOptimization=true" multipart/form-data | jq -r '.task.id // .id // empty')"
-        if (( APPLY )); then ok "account aggregation task ${acct:-?}"; (( WAIT )) && [[ -n "$acct" ]] && { wait_task "$acct" "account aggregation" || rc=1; }; fi ;;
+        if (( APPLY )); then ok "account aggregation task ${acct:-?}"; (( WAIT )) && [[ -n "$acct" ]] && { wait_task "$acct" "account aggregation" || rc=1; }; fi
+        # Restore only after the task has finished (or immediately with --no-wait, which can't wait for it).
+        delta_restore "$id" ;;
       dataset)
         step "Dataset aggregation ($id)"
         local ds; ds="$(dataset_ids "$id")"
@@ -486,7 +522,9 @@ cmd_aggregate() {
           else
             warn "dataset aggregation failed: $(sed 's/\x1b\[[0-9;]*m//g' "$dterr" | head -c 600)"
           fi
-          rm -f "$dterr"; rc=1; continue
+          # An API the tenant doesn't expose isn't a broken integration: warn, don't fail the run.
+          grep -q 'endpoint is unavailable' "$dterr" || rc=1
+          rm -f "$dterr"; continue
         fi
         rm -f "$dterr"
         if (( APPLY )); then ok "dataset aggregation task ${dt:-?} ($ds)"; (( WAIT )) && [[ -n "$dt" ]] && { wait_task "$dt" "dataset aggregation" || rc=1; }
@@ -505,6 +543,7 @@ cmd_verify() {
   # configuration, aggregation loads it. Each step only runs if the previous one passed.
   cmd_peek
   cmd_test
+  FULL=1   # the proof needs the full set, not just changes since the last delta run
   cmd_aggregate || die "aggregation reported a failure — check the task messages above"
   (( APPLY )) && ok "verified: peek, test and aggregation all succeeded"
   return 0
@@ -531,6 +570,33 @@ cmd_dataset_schedule() {
     api PUT "$API/sources/$id/datasets/$d" "$want" >/dev/null
     if (( APPLY )); then ok "scheduled aggregation $( [[ $SCHED_ON == true ]] && echo enabled || echo disabled)"; else warn "dry-run only; rerun with --apply"; fi
   done
+}
+
+cmd_schema_spn() {
+  local id="${1:-}"; [[ -n "$id" ]] || id="$(source_id "$SOURCE")"
+  step "Account schema: service-principal attributes ($id)"
+  if (( OFFLINE )); then
+    warn "plan-only: would add the missing attributes of assets/isc/account-schema-spn-attributes.json via PATCH $API/sources/$id/schemas/<account schema id>"
+    return 0
+  fi
+  local schemas acct ops
+  schemas="$(api GET "$API/sources/$id/schemas")"
+  acct="$(jq -c '[.[] | select(.name == "account")][0] // empty' <<<"$schemas")"
+  [[ -n "$acct" ]] || die "source $id has no account schema"
+  ops="$(jq -c --argjson acct "$acct" --argjson schemas "$schemas" '
+          ([$acct.attributes[].name]) as $have
+          | [ .attributes[] | select(.name as $n | $have | index($n) | not)
+              | . as $a
+              | (if $a.schema then ([$schemas[] | select(.name == $a.schema)][0]) else null end) as $s
+              | ($a | del(.schema)) + (if $s then {schema: {type: "CONNECTOR_SCHEMA", id: $s.id, name: $s.name}} else {} end)
+              | {op: "add", path: "/attributes/-", value: .} ]' "$ASSETS/isc/account-schema-spn-attributes.json")"
+  local n; n="$(jq length <<<"$ops")"
+  if (( n == 0 )); then ok "all service-principal attributes already present"; return 0; fi
+  local nosch; nosch="$(jq -r '[.[] | .value | select(.isEntitlement and (.schema | not) and .name != "spn_userConsentedPermissions") | .name] | join(", ")' <<<"$ops")"
+  [[ -z "$nosch" ]] || warn "entitlement schema missing on the source for: $nosch (added without a schema link)"
+  echo "  adding $n attribute(s): $(jq -r '[.[].value.name] | join(", ")' <<<"$ops")" >&2
+  api PATCH "$API/sources/$id/schemas/$(jq -r .id <<<"$acct")" "$ops" application/json-patch+json >/dev/null
+  if (( APPLY )); then ok "account schema updated (+$n)"; else warn "dry-run only; rerun with --apply"; fi
 }
 
 cmd_provisioning_policy() {
@@ -594,7 +660,7 @@ cmd_schedule() {
 }
 
 # Get the token here, in the main shell: api() runs inside $(...) subshells, so a token fetched there is lost.
-SUBCOMMANDS='^(discover|create|configure|show|verify|peek|test|aggregate|datasets|dataset-schedule|provisioning-policy|correlation|schedule)$'
+SUBCOMMANDS='^(discover|create|configure|show|verify|peek|test|aggregate|datasets|dataset-schedule|schema-spn|provisioning-policy|correlation|schedule)$'
 [[ "$CMD" =~ $SUBCOMMANDS ]] && token
 
 case "$CMD" in
@@ -608,6 +674,7 @@ case "$CMD" in
   aggregate) cmd_aggregate ;;
   datasets) cmd_datasets ;;
   dataset-schedule) cmd_dataset_schedule ;;
+  schema-spn) cmd_schema_spn ;;
   provisioning-policy) cmd_provisioning_policy ;;
   correlation) cmd_correlation ;;
   schedule) cmd_schedule ;;

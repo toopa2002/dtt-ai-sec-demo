@@ -30,6 +30,7 @@ GA unless marked *experimental* (header `X-SailPoint-Experimental: true` require
 | correlation | `GET`/`PUT /sources/{id}/correlation-config` | `correlation-config.tmpl.json` | |
 | schedule | `GET`/`POST /sources/{sourceId}/schedules`, `PATCH`/`DELETE …/schedules/{scheduleType}` | `{type, cronExpression}` | types: ACCOUNT_AGGREGATION, GROUP_AGGREGATION only |
 | show | `GET /sources/{id}` | — | |
+| schema-spn | `GET /sources/{sourceId}/schemas`, `PATCH /sources/{sourceId}/schemas/{schemaId}` | `[{"op":"add","path":"/attributes/-","value":{name,type,isMulti,isEntitlement,schema?}}]` | GA; adds only missing attributes |
 | dataset-schedule | `GET` then `PUT /sources/{id}/datasets/{datasetId}` *not in the published spec; captured from the UI's "Enable Schedule", used live* | the GET body with `aggregationEnabled` set to true/false | 200; frequency is ISC's default |
 | datasets (info only) | `GET /sources/{id}/datasets` *experimental, not in the published v2026 spec* | — | `[{id, name, aggregationEnabled, resources[]}]`; `aggregationEnabled` = scheduled aggregation on (stays false after manual runs). Nothing depends on it |
 
@@ -78,6 +79,23 @@ the authoritative values: `connector: "Microsoft-Entra"`, `connectorAttributes.s
 
 `keys` maps the canonical names used in the templates to this tenant's form fields; `null` = not on the form (that
 toggle is skipped). Edit by hand if a mapping is wrong; `--keymap FILE` uses another one.
+
+## UI label → field (Feature Management / Aggregation / Machine Identity Governance)
+
+| UI label | Field |
+|---|---|
+| Manage Microsoft 365 Groups / Enable Teams Governance | `manageO365Groups` / `enableTeamsGovernance` |
+| Manage User- / System-Assigned Managed Identities as Accounts | `enableManagedIdentityManagement` / `enableSystemAssignedManagedIdentity` |
+| Manage Microsoft Entra Service Principals as Accounts · Service Principal Account Filter | `manageAzureServicePrincipalAsAccount` · `spnAccountFilter` |
+| Manage Azure PIM / Microsoft Entra PIM Role Memberships | `spnManageAzurePIM` / `spnManageAzureADPIM` |
+| Manage **Role** Memberships | `spnManageDirectoryRole` (sic) |
+| Manage Application Role Memberships / Group Memberships | `spnManageAppRoles` / `spnManageGroups` |
+| Manage Microsoft Entra **Role Assignment** Memberships | `spnManageRBACRoles` (sic) |
+| Manage Admin Consented Permission Memberships / Custom Security Attributes (SP) | `manageAdminConsentedPermissions` / `manageCustomSecurityAttributesForServicePrincipals` |
+| Manage Access Packages | `enableAccessPackageManagement` |
+| Aggregate All Groups / Delta Aggregation / Aggregate Group Hierarchy / Page Size | `aggregateAllGroups` / `deltaAggregationEnabled` / `aggregateGroupHierarchy` / `pageSize` |
+| Enable Azure AI Foundry Agents · Always Use the Latest Available Version | `enableAIFoundryAgent` · `foundryAggregateLatestVersionOnly` |
+| Enable Microsoft Copilot Studio Agents / Enable Microsoft Agent 365 | `enableCopilotAIAgent` / `enableMicrosoftAgent365` |
 
 ## Source-config fields (live form, 2026-10-08)
 

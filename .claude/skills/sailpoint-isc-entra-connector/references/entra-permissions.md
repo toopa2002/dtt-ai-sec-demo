@@ -52,6 +52,8 @@ broad alternative SailPoint mentions; avoid it.
 ### machine-identity
 Application.Read.All (service principals, app registrations, managed identities, app roles),
 DelegatedPermissionGrant.Read.All (admin-consented permissions as entitlements), Device.Read.All (NHI discovery).
+CustomSecAttributeAssignment.Read.All + CustomSecAttributeDefinition.Read.All for the source's "Manage Custom Security
+Attributes" (service principals); custom security attributes need Entra ID P1.
 Turn on "Manage Azure Service Principal as Account" / managed identity management on the source (the profile's
 toggles). Machine Identity Governance needs the SailPoint Agentic Fabric licence.
 

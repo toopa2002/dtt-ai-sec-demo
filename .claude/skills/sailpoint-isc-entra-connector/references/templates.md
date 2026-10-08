@@ -65,6 +65,7 @@ just a new file here plus an entry in `assets/isc/feature-toggles.json`.
 | 20 | `assets/isc/lifecycle-state-account-actions.patch.tmpl.json` | **not scripted** — `PATCH /v2026/identity-profiles/{ip}/lifecycle-states/{ls}` | `ACCOUNT_ACTIONS` = the state's existing `accountActions` **plus** e.g. `{"action":"DISABLE","sourceIds":["<entra source id>"]}` (leaver) or `ENABLE` (joiner/rehire) |
 | 21 | `assets/isc/schedule.tmpl.json` | `POST /v2026/sources/{id}/schedules` (`schedule`) | `SCHEDULE_TYPE` (ACCOUNT_AGGREGATION / GROUP_AGGREGATION), `CRON` |
 | 22 | *(no file — built from the live object)* | `GET` then `PUT /v2026/sources/{id}/datasets/{datasetId}` (`dataset-schedule --on/--off`); undocumented, the UI's "Enable Schedule" call | the dataset object from the GET, with `aggregationEnabled` = true/false |
+| 23 | `assets/isc/account-schema-spn-attributes.json` | `PATCH /v2026/sources/{id}/schemas/{accountSchemaId}` with `add /attributes/-` per missing attribute (`schema-spn`; run by `configure` for machine-identity) | — (entitlement `schema` names resolved to ids at run time) |
 | — | `assets/isc/keymap.default.json` | not applied; field-name map used by `--plan-only` | — |
 
 Paths in #15/#16 use SailPoint's field names (verified on a live form); `configure` maps them through the discovered

@@ -1,20 +1,37 @@
 {
-  "_notes": "connectorAttributes set per profile by `isc-source.sh configure --profiles`. Field NAMES were verified on a live tenant's Microsoft Entra source-config form (2026-10-08); configure still only sends fields present on your tenant's form and reports the rest. The boolean values are what the UI toggle stores; exoAuthenticationType's allowed values are not verified, so it is left to the UI. ai-agents turns on Foundry and explicitly OFF Copilot Studio and Agent 365: those datasets fail without their own setup (Power Platform application user; Agent 365 user refresh token in agent365RefreshToken) \u2014 seen live. Switch them on by hand after that setup.",
-  "readonly": {},
+  "_notes": "connectorAttributes set per profile by `isc-source.sh configure --profiles`, merged in this order: readonly first (base settings), then the selected profiles (later ones win). Values mirror a working UI-configured Microsoft Entra source (2026-10-08); field names come from the live source-config form (UI label -> field in references/isc-api.md). configure only sends fields present on your tenant's form and reports the rest. Note the label swap: 'Manage Role Memberships' = spnManageDirectoryRole, 'Manage Microsoft Entra Role Assignment Memberships' = spnManageRBACRoles.",
+  "readonly": {
+    "aggregateAllGroups": true,
+    "deltaAggregationEnabled": true,
+    "aggregateGroupHierarchy": false,
+    "pageSize": 100,
+    "manageO365Groups": true,
+    "enableTeamsGovernance": false,
+    "enableAccessPackageManagement": false,
+    "enableManagedIdentityManagement": false,
+    "enableSystemAssignedManagedIdentity": false
+  },
   "provisioning": {},
   "machine-identity": {
     "manageAzureServicePrincipalAsAccount": true,
-    "enableManagedIdentityManagement": true,
-    "enableSystemAssignedManagedIdentity": true
+    "spnAccountFilter": "servicePrincipalType eq 'Application'",
+    "spnManageAzurePIM": false,
+    "spnManageAzureADPIM": false,
+    "spnManageDirectoryRole": true,
+    "spnManageAppRoles": true,
+    "spnManageGroups": true,
+    "spnManageRBACRoles": true,
+    "manageAdminConsentedPermissions": true,
+    "manageCustomSecurityAttributesForServicePrincipals": true
   },
   "ai-agents": {
     "enableAIFoundryAgent": true,
-    "enableCopilotAIAgent": false,
+    "foundryAggregateLatestVersionOnly": true,
+    "enableCopilotAIAgent": true,
     "enableMicrosoftAgent365": false
   },
   "exchange": {
-    "manageExchangeOnline": true,
-    "aggregateAllGroups": true
+    "manageExchangeOnline": true
   },
   "teams": {
     "enableTeamsGovernance": true
