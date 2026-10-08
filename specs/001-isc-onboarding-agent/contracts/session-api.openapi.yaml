@@ -1,0 +1,290 @@
+openapi: 3.1.0
+info:
+  title: ISC Onboarding — session API
+  version: 0.1.0
+  description: >
+    Browser-facing API, served under /onboarding/api on the local cluster. Authentication is a server-side session
+    cookie (`ob_session`, HttpOnly, Secure, SameSite=Strict). Every request after sign-in must carry the cookie and
+    the `X-CSRF-Token` header returned by /auth/session. All text in responses is already masked (FR-026).
+servers:
+  - url: /onboarding/api
+security:
+  - session: []
+components:
+  securitySchemes:
+    session: { type: apiKey, in: cookie, name: ob_session }
+  schemas:
+    Role: { type: string, enum: [iam_engineer, application_owner] }
+    StepState: { type: string, enum: [not_started, in_progress, passed, failed] }
+    Me:
+      type: object
+      required: [id, username, display_name, role, is_admin, csrf_token]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        is_admin: { type: boolean }
+        csrf_token: { type: string }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [invalid_credentials, account_locked, forbidden_role, connector_planned, tenant_unusable, validation_failed, attachment_too_large] }
+        message: { type: string }
+        retry_after_seconds: { type: integer }
+    ConnectorType:
+      type: object
+      required: [id, name, status, description, owner_asks, agent_configures, session_fields]
+      properties:
+        id: { type: string, examples: [aws-saas] }
+        name: { type: string }
+        status: { type: string, enum: [available, planned] }
+        description: { type: string }
+        owner_asks: { type: string }
+        agent_configures: { type: string }
+        session_fields:
+          type: array
+          items:
+            type: object
+            required: [name, label, type, required]
+            properties:
+              name: { type: string }
+              label: { type: string }
+              type: { type: string, enum: [string, string_list, region, region_list, aws_account_id, aws_account_id_list] }
+              required: { type: boolean }
+              default: {}
+    SessionSummary:
+      type: object
+      required: [id, title, connector_type, status, steps]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        connector_type: { type: string }
+        status: { type: string, enum: [open, finished] }
+        steps:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/StepState' }
+    Session:
+      allOf:
+        - $ref: '#/components/schemas/SessionSummary'
+        - type: object
+          required: [tenant, details, participants]
+          properties:
+            tenant: { type: object, properties: { id: { type: string }, name: { type: string }, external_id: { type: [string, 'null'] } } }
+            details: { type: object }
+            source: { type: [object, 'null'], properties: { id: { type: string }, name: { type: string } } }
+            waiting_on: { type: [string, 'null'], enum: [iam_engineer, application_owner, null], description: "Who the agent waits for (information only, FR-006a)" }
+            waiting_reason: { type: [string, 'null'], maxLength: 120, description: "The awaited person's next step, for the waiting banner (FR-006g)" }
+            participants:
+              type: object
+              properties:
+                iam_engineer: { type: object, properties: { id: { type: string }, display_name: { type: string }, online: { type: boolean } } }
+                application_owner: { type: [object, 'null'], properties: { id: { type: string }, display_name: { type: string }, online: { type: boolean } } }
+    Message:
+      type: object
+      required: [id, seq, speaker, text, created_at]
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        speaker: { type: string, enum: [iam_engineer, application_owner, agent] }
+        speaker_name: { type: string }
+        thread: { type: string, enum: [iam_engineer, application_owner], description: "Whose thread; a participant's message is always in their own thread" }
+        kind: { type: string, enum: [message, relay_note] }
+        relay_ref: { type: [string, 'null'] }
+        relayed_from: { type: [string, 'null'], enum: [iam_engineer, application_owner, null] }
+        text: { type: string }
+        masked: { type: boolean }
+        queue_state: { type: [string, 'null'], enum: [queued, processing, answered, null] }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        created_at: { type: string, format: date-time }
+    Attachment:
+      type: object
+      required: [id, secret_check]
+      properties:
+        id: { type: string }
+        secret_check: { type: string, enum: [pending, passed, held] }
+        url: { type: [string, 'null'], description: 'null unless passed' }
+    Action:
+      type: object
+      required: [id, action, ordered_by, result, at]
+      properties:
+        id: { type: string }
+        action: { type: string, enum: [create_source, configure_source, connection_check, aggregate, test_connection, delete_source] }
+        source: { type: [object, 'null'] }
+        ordered_by: { type: object, properties: { id: { type: string }, display_name: { type: string } } }
+        result: { type: string, enum: [ok, failed] }
+        error: { type: [string, 'null'] }
+        task_ids: { type: array, items: { type: string } }
+        at: { type: string, format: date-time }
+    Tenant:
+      type: object
+      required: [id, name, api_host, status]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        api_host: { type: string }
+        external_id: { type: [string, 'null'] }
+        credential_hint: { type: string, description: 'last 4 chars of the client id; the secret is never returned' }
+        status: { type: string, enum: [usable, credential_rejected, unchecked] }
+        last_checked_at: { type: [string, 'null'], format: date-time }
+    User:
+      type: object
+      required: [id, username, display_name, role, is_admin, status]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        is_admin: { type: boolean }
+        status: { type: string, enum: [active, locked, disabled] }
+        locked_until: { type: [string, 'null'], format: date-time }
+        last_sign_in: { type: [string, 'null'], format: date-time }
+
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Sign in with a local account (FR-001, FR-004)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [username, password], properties: { username: { type: string }, password: { type: string } } } } }
+      responses:
+        '200': { description: Signed in; sets `ob_session`, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { description: Wrong credentials; body states attempts left, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '423': { description: Account locked for 15 minutes, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /auth/logout:
+    post: { summary: Sign out, responses: { '204': { description: Signed out } } }
+  /auth/session:
+    get: { summary: Current user, refreshes the idle timer, responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }, '401': { description: Not signed in or idle > 30 min } } }
+
+  /catalog:
+    get:
+      summary: Connector catalog, read-only, shipped with the release (FR-028, FR-029)
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ConnectorType' } } } } } }
+
+  /sessions:
+    get:
+      summary: Sessions the caller takes part in (US6)
+      parameters: [{ name: status, in: query, schema: { type: string, enum: [open, finished] } }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SessionSummary' } } } } } }
+    post:
+      summary: Create a session (IAM engineer only; FR-005)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connector_type, tenant_id, details]
+              properties:
+                connector_type: { type: string }
+                tenant_id: { type: string }
+                details: { type: object, description: validated against the type's session_fields }
+                application_owner_id: { type: string }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '403': { description: Caller is not an IAM engineer (forbidden_role) }
+        '409': { description: Connector type is planned (connector_planned) or tenant unusable (tenant_unusable) }
+        '422': { description: validation_failed }
+  /sessions/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get: { summary: Session with participants, steps and source, responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }, '404': { description: Not a participant } } }
+  /sessions/{id}/finish:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post: { summary: Mark finished (IAM engineer); starts the 90-day retention clock, responses: { '200': { description: OK } } }
+  /sessions/{id}/suggestions:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      summary: Suggested messages for the caller's own thread (FR-006e); 3-5 items
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread: { type: string, enum: [iam_engineer, application_owner] }
+                  for_event_id: { type: integer }
+                  items:
+                    type: array
+                    minItems: 3
+                    maxItems: 5
+                    items:
+                      type: object
+                      required: [text, kind]
+                      properties:
+                        text: { type: string, maxLength: 200 }
+                        kind: { type: string, enum: [answer, order, question] }
+  /sessions/{id}/messages:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      summary: Full history (US6 #3)
+      parameters: [{ name: after_seq, in: query, schema: { type: integer } }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Message' } } } } } }
+    post:
+      summary: Send a message to the shared queue (FR-006, FR-006a). Text is masked before it is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 8000 }
+                attachment_ids: { type: array, maxItems: 3, items: { type: string } }
+      responses:
+        '202': { description: Queued; the reply arrives on the live stream, content: { application/json: { schema: { $ref: '#/components/schemas/Message' } } } }
+  /sessions/{id}/attachments:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      summary: Upload a screenshot (FR-007). The secret check runs before anyone else can see it (FR-026a).
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, properties: { file: { type: string, format: binary } } } } } }
+      responses:
+        '201': { description: Accepted with secret_check = pending; result arrives as an `attachment.checked` event, content: { application/json: { schema: { $ref: '#/components/schemas/Attachment' } } } }
+        '413': { description: attachment_too_large (> 10 MB) }
+  /sessions/{id}/attachments/{attachmentId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: attachmentId, in: path, required: true, schema: { type: string } }
+    get: { summary: Image bytes (passed only; held images only to their uploader), responses: { '200': { description: image/* }, '404': { description: Not visible to caller } } }
+    delete: { summary: Dismiss a held image (uploader only), responses: { '204': { description: Discarded } } }
+  /sessions/{id}/actions:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get: { summary: SailPoint action records (FR-020), responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Action' } } } } } } }
+  /sessions/{id}/events:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: Last-Event-ID, in: header, schema: { type: string } }
+    get:
+      summary: Live event stream (SSE). Event types in contracts/live-events.md.
+      responses: { '200': { description: text/event-stream } }
+
+  /admin/users:
+    get: { summary: List accounts (admin), responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/User' } } } } }, '403': { description: Not an admin } } }
+    post:
+      summary: Create an account (admin; FR-002)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [username, display_name, role, initial_password], properties: { username: { type: string }, display_name: { type: string }, role: { $ref: '#/components/schemas/Role' }, is_admin: { type: boolean }, initial_password: { type: string, minLength: 12 } } } } } }
+      responses: { '201': { description: Created }, '422': { description: is_admin on an application owner, or weak password } }
+  /admin/users/{userId}:
+    parameters: [{ name: userId, in: path, required: true, schema: { type: string } }]
+    patch:
+      summary: Disable/enable, unlock, reset password, change role or admin flag (admin)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { status: { type: string, enum: [active, disabled] }, unlock: { type: boolean }, new_password: { type: string }, role: { $ref: '#/components/schemas/Role' }, is_admin: { type: boolean } } } } } }
+      responses: { '200': { description: Updated } }
+  /admin/tenants:
+    get: { summary: Registered tenants (admin), responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Tenant' } } } } } } }
+    post:
+      summary: Register a tenant. The credential is written to AgentCore Identity and never stored or returned (FR-025).
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, api_host, client_id, client_secret], properties: { name: { type: string }, api_host: { type: string }, client_id: { type: string, pattern: '^[0-9a-f]{32}$' }, client_secret: { type: string, pattern: '^[0-9a-f]{64}$' } } } } } }
+      responses: { '201': { description: Registered and checked, content: { application/json: { schema: { $ref: '#/components/schemas/Tenant' } } } }, '422': { description: ID/secret look swapped or malformed (the skill's PAT check) } }
+  /admin/tenants/{tenantId}/credential:
+    parameters: [{ name: tenantId, in: path, required: true, schema: { type: string } }]
+    put:
+      summary: Replace the tenant's credential (admin)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [client_id, client_secret], properties: { client_id: { type: string }, client_secret: { type: string } } } } } }
+      responses: { '200': { description: Replaced and checked } }
+  /admin/tenants/{tenantId}/check:
+    parameters: [{ name: tenantId, in: path, required: true, schema: { type: string } }]
+    post: { summary: Check the credential now (token + GET /beta/tenant), responses: { '200': { description: Status updated, content: { application/json: { schema: { $ref: '#/components/schemas/Tenant' } } } } } }

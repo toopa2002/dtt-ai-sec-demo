@@ -5,6 +5,7 @@
 #   /mcp, /mcp/..., /.well-known/oauth-protected-resource/mcp/...  -> local edge (nginx in Docker, :8090), which serves
 #        /mcp/gw/... -> MCP Gateway (port-forward :8000, prefix stripped) and /mcp/... -> chatbot dev server (:3000)
 #        (deployment/edge-nginx.conf; ngrok's free plan routes by path but cannot rewrite paths, hence the edge)
+#   /onboarding/... -> the same edge -> ISC Onboarding Agent web (onboarding/, port-forward :8091)
 #   everything else -> NGROK_ROOT_UPSTREAM (another app's local port, e.g. 8080), or 404 if unset
 # Works on Linux/WSL and macOS (no setsid needed).
 source "$(dirname "$0")/lib.sh"
@@ -58,7 +59,7 @@ endpoints:
     traffic_policy:
       on_http_request:
         - expressions:
-            - "req.url.path == '$PUBLIC_PATH' || req.url.path.startsWith('$PUBLIC_PATH/') || req.url.path.startsWith('/.well-known/oauth-protected-resource$PUBLIC_PATH/')"
+            - "req.url.path == '$PUBLIC_PATH' || req.url.path.startsWith('$PUBLIC_PATH/') || req.url.path.startsWith('/.well-known/oauth-protected-resource$PUBLIC_PATH/') || req.url.path == '/onboarding' || req.url.path.startsWith('/onboarding/')"
           actions:
             - type: forward-internal
               config: {url: "https://mcpdemo-edge.internal"}

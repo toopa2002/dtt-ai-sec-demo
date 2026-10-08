@@ -1,0 +1,52 @@
+:host { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.page { padding: 2rem; }
+.head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.25rem;
+  padding: 0.75rem 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.title { display: flex; flex-direction: column; min-width: 14rem; }
+.title span { font-size: 0.75rem; }
+h1 { margin: 0; font-size: 1.05rem; }
+.type { background: var(--surface-2); }
+.presence { margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+.presence .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--border); }
+.presence .dot.on { background: var(--ok); }
+.warn { color: var(--warn); }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); gap: 1rem; padding: 1rem 1.5rem 1.5rem; }
+.side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; overflow-y: auto; }
+h2 { margin: 0 0 0.6rem; font-size: 0.95rem; }
+dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.9rem; font-size: 0.82rem; }
+dt { color: var(--muted); }
+dd { margin: 0; word-break: break-all; }
+.small { font-size: 0.78rem; }
+.actions ol, .steps { list-style: none; margin: 0 0 0.75rem; padding: 0; font-size: 0.82rem; }
+.actions li { display: flex; gap: 0.5rem; padding: 0.55rem 0; border-top: 1px solid var(--border); }
+.actions li small { display: block; color: var(--muted); }
+.actions li small.error { color: var(--bad); }
+.icon.ok { color: var(--ok); flex: none; margin-top: 0.15rem; }
+.icon.bad { color: var(--bad); flex: none; margin-top: 0.15rem; }
+.steps li { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; gap: 0.4rem; align-items: center; padding: 0.45rem 0.3rem;
+  border-top: 1px solid var(--border); border-radius: 6px; }
+.steps li.empty { display: block; }  /* the empty-state line spans the row, not the number column */
+.steps li.current { background: var(--aws-fill); }
+.steps li.done .t { color: var(--muted); }
+.steps li.failed { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.steps .n { font-weight: 700; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.steps .n .icon { width: 1rem; height: 1rem; margin: 0; }
+.conversations { display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: 0.6rem; }
+.conv-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.9rem; }
+.conv-head h2 { margin: 0; }
+/* FR-006f, research R19: the threads fill the space left and their logs scroll; the page itself never grows. */
+.threads { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); gap: 1rem; }
+.threads app-thread { min-height: 0; }
+.finished { margin: 0; padding: 0.9rem 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+@media (max-width: 1100px) {
+  /* stacked: each thread keeps its own log height; the conversations column scrolls */
+  .threads { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .conversations { overflow-y: auto; }
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; overflow-y: auto; }
+}

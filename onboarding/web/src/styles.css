@@ -1,0 +1,63 @@
+/* Deloitte palette, shared with chatbot/ (design canvas "ISC Onboarding Agent UI"). */
+:root {
+  --bg: #f5f5f5; --surface: #ffffff; --surface-2: #f2f2f2; --border: #d0d0ce;
+  --text: #000000; --text-2: #404040; --muted: #53565a;
+  --accent: #000000; --on-accent: #ffffff;   /* primary buttons, user bubbles, selected toggle */
+  --highlight: #86bc25;                      /* Deloitte green: selection ring, MCP Gateway, brand icon */
+  --ok: #26880d; --bad: #b3261e; --deny: #da291c; --warn: #b7791f;
+  --info: #0076a8; --info-strong: #005587;   /* "as:" identities, AWS resource names, traffic in flight */
+  --aws-line: #0076a8; --aws-fill: #f2f8fc; --aws-text: #005587;
+  --int-line: #007680; --int-fill: #eef6f6; --int-text: #005f66;
+  --waiting-bg: #fff4e5; --waiting-border: #e8a33d; --waiting-icon: #b45309; --waiting-text: #000000;  /* waiting banner (FR-006g) */
+  --font: 'Open Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0b; --surface: #161616; --surface-2: #1f1f1f; --border: #3a3a3a;
+    --text: #f2f2f2; --text-2: #d0d0ce; --muted: #a7a8aa;
+    --accent: #ffffff; --on-accent: #000000;
+    --highlight: #86bc25; --ok: #86bc25; --bad: #ff6b5e; --deny: #ff6b5e; --warn: #e0a84a;
+    --info: #62b5e5; --info-strong: #8fcbea;
+    --aws-line: #62b5e5; --aws-fill: #0d1a22; --aws-text: #8fcbea;
+    --int-line: #6fc2b4; --int-fill: #0d1c1b; --int-text: #9ed7cd;
+    --waiting-bg: #2a1d0a; --waiting-border: #e0a84a; --waiting-icon: #e0a84a; --waiting-text: #f2f2f2;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 15px; }
+code, pre { font-family: var(--mono); }
+a { color: var(--text); } a:hover { color: var(--ok); }
+button {
+  font: inherit; padding: 0.5rem 0.95rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; min-height: 36px;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button:disabled { opacity: 0.6; cursor: default; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--highlight); outline-offset: 2px;
+}
+input, select, textarea {
+  font: inherit; padding: 0.5rem 0.7rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); min-height: 38px;
+}
+label { font-weight: 600; font-size: 0.85rem; }
+.icon { width: 1em; height: 1em; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); }
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.7rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); font-size: 0.8rem; white-space: nowrap; }
+.chip.passed { border-color: var(--ok); color: var(--ok); }
+.chip.failed { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+.chip.in_progress { border-color: var(--info); color: var(--info); }
+.tag { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.tag.ro { border: 1px solid var(--border); color: var(--muted); }
+.tag.ch { background: var(--accent); color: var(--on-accent); }
+.badge { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+.badge.iam { background: var(--highlight); color: #000; }
+.badge.owner { background: var(--info-strong); color: #fff; }
+.error { color: var(--bad); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

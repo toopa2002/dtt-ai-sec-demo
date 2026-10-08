@@ -42,4 +42,28 @@ down:            ## Stop tunnel, delete the adapter namespace
 destroy:         ## Remove everything (AWS, Entra apps, k3s)
 	$(S)/99-teardown.sh --aws --entra --k3s
 
-.PHONY: help prereqs k3s entra images images-docker up adapters test-agent agent agentcore-gw bedrock-agent chat demo verify tunnel access down destroy
+# ---- ISC Onboarding Agent (spec 001, onboarding/) ----
+O := onboarding/deploy/scripts
+onboarding-images:        ## Onboarding: build onboarding-api (API + web, one container) into localhost:5000
+	$(O)/images.sh
+onboarding-agent:         ## Onboarding: deploy the AgentCore runtime + scoped IAM user for the API
+	$(O)/agent-deploy.sh
+onboarding-agent-delete:  ## Onboarding: delete the runtime, IAM user and tenant credential providers
+	$(O)/agent-deploy.sh --delete
+onboarding-up:            ## Onboarding: MongoDB, API, web, network policies; /onboarding/ on the edge
+	$(O)/up.sh
+onboarding-bootstrap:     ## Onboarding: create the first admin account
+	$(O)/bootstrap.sh
+onboarding-dev:           ## Onboarding: run the whole stack locally against the ISC stub (no cluster)
+	$(O)/dev.sh start
+
+onboarding-evals:         ## Onboarding: agent diagnosis evals (SC-005)
+	$(O)/evals.sh
+onboarding-e2e:           ## Onboarding: two-browser end-to-end run against the ISC stub
+	$(O)/e2e.sh
+onboarding-leak-scan:     ## Onboarding: scan MongoDB and logs for leaked secrets (SC-004)
+	$(O)/leak-scan.sh
+onboarding-down:          ## Onboarding: delete the onboarding namespace (PVC included)
+	$(O)/down.sh
+
+.PHONY: help prereqs k3s entra images images-docker up adapters test-agent agent agentcore-gw bedrock-agent chat demo verify tunnel access down destroy onboarding-images onboarding-agent onboarding-agent-delete onboarding-up onboarding-bootstrap onboarding-dev onboarding-evals onboarding-e2e onboarding-leak-scan onboarding-down

@@ -1,0 +1,73 @@
+# AWS SaaS diagnosis evals (SC-005): one case per failures.md entry. Each runs as pasted text and as a screenshot.
+# side: application | sailpoint. fails: SailPoint tools that return the error (default: all).
+# cause: regexes, any of which must appear in the first reply (case-insensitive).
+- id: F1
+  speaker: iam_engineer
+  side: application
+  error: >-
+    Test connection failed: AWS Client creation failed: User: arn:aws:sts::706944607044:assumed-role/ciem_universal/sp
+    is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::111122223333:role/SailPointISCRole-acme-demo
+    (Service: Sts, Status Code: 403, Error Code: AccessDenied)
+  cause: ['external.?id', 'trust', 'principal']
+- id: F2
+  speaker: application_owner
+  side: application
+  error: >-
+    aws iam get-role output: "Principal": {"AWS": "arn:aws:iam::874540850173:role/ciem_universal"}, "Condition":
+    {"StringEquals": {"sts:ExternalId": "5c0d9a3e-7b14-4f2a-9e61-2d8a4c7b1f90"}}. SailPoint still says
+    AccessDenied sts:AssumeRole from arn:aws:sts::706944607044:assumed-role/ciem_universal.
+  cause: ['706944607044', 'principal', 'demo']
+- id: F3
+  speaker: application_owner
+  side: application
+  error: >-
+    An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name SailPointISCRole-acme-demo
+    cannot be found.
+  cause: ['(role|it).{0,40}(not exist|doesn.t exist|missing|not found|cannot be found|create)', 'step [3-6]']
+- id: F4
+  speaker: iam_engineer
+  side: sailpoint
+  error: >-
+    Aggregation failed: sailpoint.connector.ConnectorException: no schema provided for account list
+  cause: ['schema', 'stale', 'rerun|retry|again']
+- id: F5
+  speaker: iam_engineer
+  side: sailpoint
+  fails: [test_connection]
+  error: >-
+    Test Connection failed: java.lang.NullPointerException: Cannot invoke "Object.toString()" because "req.input" is
+    null. Source status: Not Responding.
+  cause: ['aggregat', 'expected']
+- id: F6
+  speaker: iam_engineer
+  side: sailpoint
+  error: >-
+    java.lang.NullPointerException at sailpoint.connector.ConnectorProxy.getInternalConnector(): Value of 'cluster'
+    cannot be null
+  cause: ['connector instance', 'spConnectorSpecId', 'recreate|delete']
+- id: F7
+  speaker: iam_engineer
+  side: application
+  error: >-
+    Aggregation completed with warnings. Dataset AgentCore runtimes: Permission error (bedrock-agentcore): 2/2
+    accounts, 1/1 regions
+  cause: ['ListGateways', 'GetResourcePolicy', 'ListTagsForResource', 'polic(y|ies)', 'permission']
+- id: F8
+  speaker: iam_engineer
+  side: sailpoint
+  error: >-
+    Unable to save source. Change Password Policy ARN is required.
+  cause: ['IAMUserChangePassword', 'changePasswordPolicyARN', 'change.?password']
+- id: F9
+  speaker: iam_engineer
+  side: sailpoint
+  error: >-
+    {"error":"invalid_client","error_description":"Full authentication is required to access this resource"}
+  cause: ['credential', 'admin', 'token']
+- id: F10
+  speaker: application_owner
+  side: application
+  error: >-
+    An error occurred (AWSOrganizationsNotInUseException) when calling the DescribeOrganization operation: Your
+    account is not a member of an organization.
+  cause: ['organi[sz]ation', 'management account']

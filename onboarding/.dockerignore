@@ -1,0 +1,14 @@
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/tests/
+web/node_modules/
+web/dist/
+web/.angular/
+web/e2e/
+web/test-results/
+web/playwright-report/
+agent/
+deploy/

@@ -127,6 +127,14 @@ Upstream MCP Gateway uses Entra auth only in Production mode, which requires Cos
 `Authentication__UseEntra=true` so the local Redis setup authenticates with Entra. It is applied to a
 clean submodule at build time (`scripts/03-build-push.sh`); the submodule itself stays unmodified.
 
+## ISC Onboarding Agent
+
+A second app in this repo, under [`onboarding/`](onboarding/): an IAM engineer and an application owner onboard an
+application into SailPoint ISC in one shared chat, with a Claude Haiku agent on AgentCore doing the SailPoint side.
+Web, API and MongoDB run on the local cluster under `/onboarding/` on the same ngrok domain; the agent runs on
+AgentCore. Start with [`onboarding/README.md`](onboarding/README.md); deployment steps are in
+[docs/DEMO-GUIDE.md §8](docs/DEMO-GUIDE.md#8-isc-onboarding-agent).
+
 ## Cost
 
 Only AWS costs money: about $0.005 per question (Haiku 4.5) and a few cents for deploys; idle about

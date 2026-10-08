@@ -510,3 +510,88 @@ Open-Meteo is free for non-commercial use only. Set `"WEATHER_MOCK": "1"` in `de
 | `chatbot/` | Angular SPA with MSAL Angular; `proxy.conf.js` forwards to AgentCore |
 | `entra/access.json` | Persona → role assignments |
 | `scripts/` | Setup, deploy, demo, verify and teardown scripts (`make help`) |
+| `onboarding/` | ISC Onboarding Agent: web, API, agent, connector catalog, deploy scripts (§8) |
+
+---
+
+## 8. ISC Onboarding Agent
+
+A separate app in [`onboarding/`](../onboarding/README.md): an IAM engineer and an application owner onboard an
+application into SailPoint ISC in one live chat. A Claude Haiku agent does the SailPoint side on the IAM engineer's
+order and only ever gives the application owner instructions. Spec, plan and tasks:
+[`specs/001-isc-onboarding-agent/`](../specs/001-isc-onboarding-agent/).
+
+### 8.1 Where it runs
+
+```
+Browser ─► ngrok /onboarding/ ─► mcpdemo-edge ─► :8091 port-forward ─► onboarding-api (one container:
+                                                                         │ /onboarding/ web build, /onboarding/api/)
+                                                                         ▼
+                              local cluster, namespace onboarding:   onboarding-api ─► MongoDB (StatefulSet + PVC)
+                                                                         │ SigV4 InvokeAgentRuntime (IAM user onboarding-api)
+                                                                         ▼
+                              AWS ap-southeast-1:   AgentCore runtime isc_onboarding_agent (Claude Haiku 4.5)
+                                                     │ ISC token per tenant from AgentCore Identity (onboarding-isc-<tenant>)
+                                                     ▼
+                                                   SailPoint ISC tenant API
+```
+
+All user data (accounts, transcripts, screenshots, action records) stays in MongoDB on the local cluster. The agent
+is stateless: the API sends it one turn with the history it needs. Tenant credentials go straight from the admin
+form into AgentCore Identity and are never stored locally.
+
+### 8.2 Deploy (one time)
+
+Prerequisites: the cluster from §5.2 (Docker Desktop Kubernetes on macOS, or k3s), the local registry, AWS CLI
+credentials for the account, the `agentcore` CLI, and `uv`.
+
+```bash
+make onboarding-agent        # AgentCore runtime + execution-role policy + IAM user onboarding-api;
+                             # its access key is written straight into Secret onboarding/onboarding-aws
+make onboarding-images       # onboarding-api (API + web build) into localhost:5000
+make onboarding-up           # MongoDB, the app, network policies, port-forward :8091, edge reload
+make onboarding-bootstrap    # first admin account (an IAM engineer with the admin flag); password prompted
+```
+
+`make onboarding-agent` creates AWS resources (the runtime, an IAM user and an access key). Run it once; rerun it
+after changing anything under `onboarding/agent/` or `onboarding/catalog/`.
+
+Then open `https://<ngrok domain>/onboarding/`, sign in as the admin, and under **Admin**:
+
+1. **Tenants → Register:** tenant name, API host (`<tenant>.api.identitynow-demo.com`), and a SailPoint personal
+   access token (client ID and secret). The API checks it against the tenant, reads the tenant's External ID, and
+   stores the token in AgentCore Identity. **Check now** re-runs the check through the agent.
+2. **Accounts:** create the IAM engineers and application owners (local accounts, 12+ character passwords).
+
+The ngrok traffic policy must send `/onboarding` to the edge. `make tunnel` writes a policy that does. If the live
+`.run/ngrok-mcpdemo.yml` was edited by hand to share the domain with another project, add the `/onboarding` rule
+there instead of rerunning `make tunnel`.
+
+### 8.3 Demo script (about 10 minutes)
+
+| Step | Who | What to show |
+|---|---|---|
+| 1 | IAM engineer | **Catalog**: AWS SaaS available, the planned types listed. **Start a session**: tenant, application owner, source name, management account, member accounts, regions. |
+| 2 | Application owner | Opens the session from **Sessions**. Each screen shows **Conversations**: the person's own thread (message box plus 3–5 suggested replies) and the other person's thread, live but **View only**. Picks the suggestion "What do I need to set up in AWS first?" The agent answers in the owner's thread with copy-ready AWS CLI steps, values filled in (External ID, role name, account IDs). |
+| 3 | Application owner | Asks the agent to create the connector. It declines: only the IAM engineer orders SailPoint changes. Pasting an `AKIA…` key shows it masked on both screens. Suggestions never offer the owner a SailPoint order. |
+| 4 | IAM engineer | Picks "Create the connector and run the checks". Status chips update live on both screens, **SailPoint actions** records each change with who ordered it. |
+| 5 | Both | If the trust is wrong, the connection check fails: the diagnosis (**Side: AWS**, the quoted error) is in the IAM engineer's thread, the read-only check and then the fix go to the owner **in the owner's thread**, and a one-line **relay note** in the IAM engineer's thread says what was asked. An amber **waiting banner** with a clock appears above the message box in all four threads: the owner sees "Waiting for you: <next step>", the IAM engineer "Waiting for <owner>: <next step>"; it is information only, so the IAM engineer can still write and is answered at once, and it disappears as soon as the owner answers. Each thread's messages scroll in their own area; scroll up to read and a **New messages** button offers the jump back down. Paste the error or upload a screenshot; screenshots that show secrets are held for the uploader only. |
+| 6 | Application owner | Picks "Done, I applied the fix". The checks rerun **without a new order**: the IAM engineer's order stands, and the action records name the IAM engineer as "rerun after the application owner confirmed a fix". The results land in the IAM engineer's thread with a note in the owner's. |
+| 7 | IAM engineer | Aggregation and Test Connection pass. **Finish** the session; it stays readable for 90 days. |
+
+### 8.4 Run and test without the cluster
+
+`make onboarding-dev` runs the whole stack on this machine against the ISC stub, with the agent calling the real
+Claude Haiku on Bedrock through your AWS credentials. `make onboarding-e2e` (two-browser Playwright run, then the
+leak scan), `make onboarding-evals` (failure diagnosis, SC-005) and `make onboarding-leak-scan` are described in
+[`onboarding/README.md`](../onboarding/README.md#run-it-locally-without-a-cluster).
+
+### 8.5 Teardown
+
+```bash
+make onboarding-down           # delete namespace onboarding (MongoDB data included) and the port-forward
+make onboarding-agent-delete   # delete the AgentCore runtime, the IAM user and every onboarding-isc-* credential provider
+onboarding/deploy/scripts/dev.sh stop   # local stack; docker rm -f onb-mongo-test removes its data
+```
+
+Cost: about $0.005 per agent turn (Haiku 4.5); nothing when idle.

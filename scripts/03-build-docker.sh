@@ -19,7 +19,8 @@ publish() {  # publish <project dir under dotnet/> <image name> [extra msbuild a
   local proj=$1 name=$2; shift 2
   step "Publishing $name (in $SDK)"
   docker run --rm -v "$GW:/src" -v "$OUT:/out" -w /src "$SDK" \
-    dotnet publish "dotnet/$proj/src/$proj.csproj" -c Release -r linux-x64 -t:PublishContainer \
+    dotnet publish "dotnet/$proj/src/$proj.csproj" -c Release -r linux-musl-x64 -t:PublishContainer \
+      -p:ContainerFamily=alpine \
       -p:ContainerRepository="$name" -p:ContainerImageTag=latest -p:ContainerArchiveOutputPath="/out/$name.tar.gz" "$@" \
     | grep -E 'error|warn.*CONTAINER|Pushed|archive|Built' || true
   [[ -s "$OUT/$name.tar.gz" ]] || die "$name: no image archive produced"

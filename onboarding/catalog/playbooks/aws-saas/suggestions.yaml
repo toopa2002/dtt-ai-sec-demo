@@ -1,0 +1,44 @@
+# Default suggested messages per role and session state (FR-006e, research R17; contracts/connector-playbook.md).
+# The API tops up the agent's own suggestions from here so each own thread always offers 3–5. Kinds: answer |
+# order | question. The application owner's lists never contain an order (FR-019); `any` has at least 3 per role.
+# States: no_source | waiting_for_owner_output | check_failed | all_passed | any.
+
+iam_engineer:
+  no_source:
+    - { text: "Create the connector and run the checks", kind: order }
+    - { text: "What does the AWS owner have to prepare first?", kind: question }
+    - { text: "Which SailPoint settings will you configure on the source?", kind: question }
+  check_failed:
+    - { text: "Why did the connection check fail?", kind: question }
+    - { text: "Rerun the connection check", kind: order }
+    - { text: "What has the AWS owner been asked to do?", kind: question }
+  all_passed:
+    - { text: "Summarise what was created and configured in SailPoint", kind: question }
+    - { text: "Is there anything left before I finish the session?", kind: question }
+    - { text: "Run Test Connection again", kind: order }
+  any:
+    - { text: "What is left to do?", kind: question }
+    - { text: "Explain the last message", kind: question }
+    - { text: "Show me the current status", kind: question }
+    - { text: "Run the connection check, aggregation and Test Connection", kind: order }
+
+application_owner:
+  waiting_for_owner_output:
+    - { text: "Here is the output:", kind: answer }
+    - { text: "I get an error at this step", kind: answer }
+    - { text: "Explain what this step does", kind: question }
+  no_source:
+    - { text: "What do I need to set up in AWS first?", kind: question }
+    - { text: "Which AWS permissions will SailPoint get?", kind: question }
+  check_failed:
+    - { text: "Done, I applied the fix", kind: answer }
+    - { text: "I get an error at this step", kind: answer }
+    - { text: "Which AWS page should I screenshot?", kind: question }
+  all_passed:
+    - { text: "What did SailPoint read from my AWS accounts?", kind: question }
+    - { text: "Is there anything else I need to do in AWS?", kind: question }
+  any:
+    - { text: "What is left to do?", kind: question }
+    - { text: "Explain the last message", kind: question }
+    - { text: "Show me the current status", kind: question }
+    - { text: "Here is the output:", kind: answer }

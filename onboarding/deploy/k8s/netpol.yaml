@@ -1,0 +1,27 @@
+# MongoDB accepts only the API (and its own rs-init job); the API pod (which also serves the web app) accepts no
+# traffic from other pods. It is exposed only through a port-forward that the edge (mcpdemo-edge) uses.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongodb-from-api-only
+  namespace: onboarding
+spec:
+  podSelector: { matchLabels: { app: mongodb } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: onboarding-api } }
+        - podSelector: { matchLabels: { app: mongodb-rs-init } }
+        - podSelector: { matchLabels: { app: onboarding-bootstrap } }
+        - podSelector: { matchLabels: { app: mongodb } }
+      ports: [{ port: 27017 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-no-ingress
+  namespace: onboarding
+spec:
+  podSelector: { matchLabels: { app: onboarding-api } }
+  policyTypes: [Ingress]
+  ingress: []

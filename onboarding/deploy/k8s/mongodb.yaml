@@ -1,0 +1,77 @@
+# MongoDB for the ISC Onboarding Agent (research R11): one-member replica set so change streams are available later,
+# 5 Gi PVC with no storageClassName (works on k3s local-path and Docker Desktop "standard"). Image: the slim build
+# from deploy/mongo/Dockerfile (mongod + mongosh only), built by images.sh.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: onboarding
+  labels: { app.kubernetes.io/part-of: isc-onboarding }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: onboarding
+spec:
+  clusterIP: None
+  selector: { app: mongodb }
+  ports: [{ name: mongo, port: 27017, targetPort: 27017 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: onboarding
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector: { matchLabels: { app: mongodb } }
+  template:
+    metadata: { labels: { app: mongodb } }
+    spec:
+      containers:
+        - name: mongodb
+          image: localhost:5000/onboarding-mongo:8.0
+          imagePullPolicy: Always
+          args: ["--replSet", "rs0", "--bind_ip_all"]
+          ports: [{ containerPort: 27017, name: mongo }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          readinessProbe:
+            exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts: [{ name: data, mountPath: /data/db }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 5Gi } }
+---
+# Initiates the replica set once (idempotent: rs.status() succeeds after the first run).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-rs-init
+  namespace: onboarding
+spec:
+  backoffLimit: 20
+  template:
+    metadata: { labels: { app: mongodb-rs-init } }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: localhost:5000/onboarding-mongo:8.0
+          imagePullPolicy: Always
+          command:
+            - mongosh
+            - --host
+            - mongodb-0.mongodb.onboarding.svc.cluster.local
+            - --quiet
+            - --eval
+            - >-
+              try { rs.status().ok } catch (e) {
+                rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongodb-0.mongodb.onboarding.svc.cluster.local:27017"}]}).ok
+              }
