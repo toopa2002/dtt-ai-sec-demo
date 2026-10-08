@@ -3,9 +3,8 @@
 The agent's streamed reply always lands in the writer's thread: the model never chooses where its text goes. These
 tools are the only way to reach the other participant's thread (FR-006c), to say who the agent is waiting for
 (information only, FR-006a), to give the application owner their setup steps, and to offer suggested replies
-(FR-006e). Step states for SailPoint checks are set by the ISC tools themselves; the model may only mark the
-application step in progress (it can never mark it passed: that happens when SailPoint's connection check reads
-accounts)."""
+(FR-006e), to keep the shared plan current (FR-008b) and to explain a failed SailPoint action (FR-020). Milestones
+for the SailPoint checks are set by the ISC tools themselves; the plan's milestones are derived by the API."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -15,6 +14,8 @@ THREADS = ("iam_engineer", "application_owner")
 SUGGESTION_KINDS = ("answer", "order", "question")
 MAX_SUGGESTION_TEXT = 200
 MAX_WAITING_REASON = 120
+MAX_DIAGNOSIS = 1000
+PLAN_OPS = ("set_state", "add", "skip")
 
 
 def other_thread(thread: str) -> str:
@@ -78,10 +79,33 @@ class SessionTools:
         await self.emit({"type": "suggestions", "thread": thread, "items": cleaned})
         return {"ok": True, "accepted": len(cleaned)}
 
-    async def record_application_step(self, index: int, title: str, read_only: bool) -> dict[str, Any]:
-        await self.emit({"type": "application_step", "index": index, "text": title, "read_only": bool(read_only)})
-        return {"ok": True}
+    async def update_plan(self, ops: list[dict[str, Any]]) -> dict[str, Any]:
+        """Change the shared plan (FR-008b, research R22): mark steps as you work, add a step (a fix, an extra check)
+        or skip one, always with a one-line reason where one is needed. Steps are never removed; the API checks the
+        ops again and applies all or none."""
+        cleaned = []
+        for i, op in enumerate(ops or []):
+            if not isinstance(op, dict) or op.get("op") not in PLAN_OPS:
+                return {"ok": False, "error": f"op {i}: use one of {', '.join(PLAN_OPS)} (steps are never removed)"}
+            reason = " ".join(str(op.get("reason") or "").split())
+            needs_reason = op["op"] in ("add", "skip") or op.get("state") in ("failed", "blocked", "skipped")
+            if needs_reason and not reason:
+                return {"ok": False, "error": f"op {i} ({op['op']} {op.get('step_id') or op.get('title', '')}): "
+                                              "give a one-line reason"}
+            if op["op"] in ("set_state", "skip") and not op.get("step_id"):
+                return {"ok": False, "error": f"op {i}: step_id is required"}
+            if op["op"] == "add" and not str(op.get("title") or "").strip():
+                return {"ok": False, "error": f"op {i}: an added step needs a title"}
+            cleaned.append({k: v for k, v in op.items() if v not in (None, "")} | ({"reason": reason} if reason else {}))
+        if not cleaned:
+            return {"ok": False, "error": "no ops"}
+        await self.emit({"type": "plan", "ops": cleaned})
+        return {"ok": True, "ops": len(cleaned)}
 
-    async def mark_application_in_progress(self) -> dict[str, Any]:
-        await self.emit({"type": "set_step", "step": "application_ready", "state": "in_progress"})
+    async def note_diagnosis(self, text: str) -> dict[str, Any]:
+        """Your diagnosis of the SailPoint action that just failed, for its details in the action record (FR-020)."""
+        text = " ".join(str(text or "").split())[:MAX_DIAGNOSIS]
+        if not text:
+            return {"ok": False, "error": "text is required"}
+        await self.emit({"type": "diagnosis", "text": text})
         return {"ok": True}

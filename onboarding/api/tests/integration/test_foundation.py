@@ -172,7 +172,8 @@ async def test_session_turn_end_to_end(fake_store, isc, fake_agent) -> None:  # 
         assert msgs[1]["thread"] == "iam_engineer" and msgs[1]["kind"] == "message"
         assert "AKIAIOSFODNN7EXAMPLE" not in msgs[1]["text"]
 
-        actions = (await b.get(f"/onboarding/api/sessions/{sid}/actions")).json()
+        assert (await b.get(f"/onboarding/api/sessions/{sid}/actions")).status_code == 403  # IAM engineer only (R24)
+        actions = (await a.get(f"/onboarding/api/sessions/{sid}/actions")).json()
         assert len(actions) == 1
         assert actions[0]["ordered_by"]["display_name"] == iam.title()
 
@@ -181,7 +182,9 @@ async def test_session_turn_end_to_end(fake_store, isc, fake_agent) -> None:  # 
         assert detail["source"] == {"id": "2c91808a", "name": "AWS - Acme Org"}
 
         types = [e["type"] async for e in db().events.find({"session_id": ObjectId(sid)}, sort=[("event_id", 1)])]
-        assert types[:2] == ["message.created", "message.queue"]
+        # the message and its agent reply (status `received`, FR-006h) are created together, then queued
+        assert types[:3] == ["message.created", "message.created", "message.queue"]
+        assert "reply.status" in types
         for expected in ("agent.progress", "agent.delta", "step.changed", "session.updated", "action.recorded",
                          "agent.message"):
             assert expected in types

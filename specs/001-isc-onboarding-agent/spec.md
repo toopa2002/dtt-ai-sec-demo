@@ -4,7 +4,10 @@
 
 **Created**: 2026-10-07 (revised 2026-10-07: generalised to any connector type; actor renamed to Application owner;
 revised 2026-10-07: one thread per person, per the design canvas; revised 2026-10-07: suggested replies;
-revised 2026-10-07: scrolling threads and a prominent waiting banner, per the updated design canvas)
+revised 2026-10-07: scrolling threads and a prominent waiting banner, per the updated design canvas;
+revised 2026-10-08: status replies instead of "queued", a shared onboarding plan, admin reopen and handover, SailPoint
+action details; revised 2026-10-08: the application owner sees their own thread, the IAM engineer's threads scroll
+in step by time)
 
 **Status**: Draft
 
@@ -21,10 +24,11 @@ feature gives both of them one shared, live onboarding session with an AI onboar
   every value filled in, and checks what comes back.
 - The agent **acts on SailPoint ISC** on the **IAM engineer**'s order: it creates, configures, tests and aggregates
   the source, and fixes SailPoint-side problems itself.
-- Each person has their own login and screen and their own **thread** with the agent. Next to it, each screen shows
-  the other person's thread live, read-only, so both always see what the other person and the agent are saying. The
-  agent works between the two threads: it asks each person for what it needs in that person's thread and tells the
-  other one what happened.
+- Each person has their own login and screen and their own **thread** with the agent. The IAM engineer's screen also
+  shows the application owner's thread live, read-only, beside their own, the two scrolling in step by time; the
+  application owner's screen shows only their own thread, with the IAM engineer's thread hidden until they choose to
+  open it. The agent works between the two threads: it asks each person for what it needs in that person's thread
+  and tells the other one what happened.
 
 The product is built for **any connector type**. Each connector type brings its own setup steps for the application
 owner, its own source settings, checks and known failures; the sessions, roles, conversation threads, audit and
@@ -55,6 +59,16 @@ the access that connector type needs.
 - Revision 2026-10-07 (user request): each participant's message box offers at least 3 suggested questions or answers for the current point in the session; the participant can pick one or type their own message.
 - Revision 2026-10-07 (user request, updated design canvas "ISC Onboarding Agent UI"): each thread's messages scroll inside a fixed-height area with a vertical scrollbar, so the page does not grow and the message box stays in view; and the "waiting" message is a prominent banner (highlighted strip with a clock icon and a bold lead naming who is waited on) shown in both threads on both screens, worded for the viewer. The canvas's line "Your next message will be queued" is not adopted: per the answer above, waiting never holds a message back.
 
+### Session 2026-10-08
+
+- Q: A message sent while the agent is busy shows only "queued", and people don't know whether or when they will get an answer. What should they see instead? → A: An instant status reply: the agent's reply appears in the thread at once with a live status ("Received. I'm finishing the IAM engineer's request first; yours is next"), changes to what the agent is doing once it starts, and becomes the full answer in the same place. Messages are still handled one at a time in arrival order; the bare "queued" label goes.
+- Q: How should the overall plan (what is done, what is left) be shown? → A: One shared plan on both screens: every step from start to finish, each with who does it and its state, a "x of y done" count and the next step highlighted. It starts from the connector type's playbook; the agent marks steps as it goes and may add or skip a step with a one-line reason. The status chips stay as a summary.
+- Q: Who may reopen a finished session or hand a session to another person? → A: Admins only. An admin can reopen a finished session and hand either participant's place to another active user with the same role; both are recorded, and the new participant sees the full history.
+- Q: What should the application owner see of the IAM engineer's conversation with the agent? → A: Only their own thread, full width; the IAM engineer's thread is hidden in a collapsed bar ("IAM engineer ↔ Agent (hidden) · Show") that opens it read-only and starts collapsed on every visit. Relay notes, the waiting banner and the plan still keep the owner informed. The IAM engineer still sees both threads. This supersedes the 2026-10-07 revision for the owner's screen.
+- Q: On the IAM engineer's screen, how should the two conversation boxes match the timeline? → A: They stay side by side and scroll in step by time: scrolling one brings the other to the same moment, both show time dividers at the same times, and a "Sync" toggle allows scrolling them separately.
+- Q: Should the SailPoint action record and its request/response details be shown to the IAM engineer only? → A: Yes, IAM engineer only; the application owner follows results through the plan and relay notes.
+- Revision 2026-10-08 (user request): each entry in the SailPoint action record shows its outcome in one line, and opening it shows the details of the request the agent sent and the response SailPoint returned, masked.
+
 ## Actors and terms
 
 - **Application owner**: the person who can change the application being onboarded — for the AWS SaaS connector, the
@@ -67,6 +81,8 @@ the access that connector type needs.
   *available* or *planned*.
 - **Onboarding session**: one application being onboarded with one connector type into one tenant, by one IAM
   engineer and one application owner.
+- **Plan**: the session's list of onboarding steps from start to finish, shared by both participants; each step has
+  who does it (application owner, IAM engineer or agent) and a state.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -127,7 +143,7 @@ agent ever having AWS access.
    the agent gives instructions with no remaining placeholders for values the session already knows, and states for
    each step what it changes and whether it is read-only.
 2. **Given** the application owner pastes the output of a step, **When** the output shows success, **Then** the agent
-   marks that application step done in the session status and gives the next step.
+   marks that step done in the plan, on both screens, and gives the next step.
 3. **Given** the pasted output shows an error or an unexpected state (e.g. an AWS role with that name already exists
    and was not created for this onboarding), **When** the agent reviews it, **Then** it explains the cause in plain
    language and gives the read-only step(s) needed to confirm it, and never proposes overwriting something in the
@@ -141,42 +157,51 @@ agent ever having AWS access.
 
 ### User Story 3 - Each participant has their own thread and sees the other's live (Priority: P2)
 
-Each participant has their own screen with two threads side by side under "Conversations": **their own thread with
-the agent**, where they write, and **the other participant's thread**, which they can read live but not post in.
+Each participant has their own screen with **their own thread with the agent** under "Conversations", where they
+write. The IAM engineer also sees **the application owner's thread** beside their own, live and view only, and the
+two scroll in step by time so both show the same moment. The application owner sees only their own thread; the IAM
+engineer's thread is hidden in a collapsed bar that they can open, view only, when they want the context.
 The agent works between the two: when it needs something from the other person it asks in that person's thread,
 and it leaves a short relay note in the thread where the request came from (for example "Cause found in the
 application owner's thread; fix sent to them"). Each screen also shows the session header (connector type, the
 current status: application ready, source created, configured, connection check, aggregation, Test Connection, and
-whether the other participant is online) and a side panel for that role: the source details and the SailPoint
-action record for the IAM engineer; the setup steps (each marked read-only or change, with its state) and the
-values the agent fills in for the application owner.
+whether the other participant is online), the shared **plan** of every step with what is done and what is left, and
+a side panel for that role: the source details and the SailPoint action record (each entry opening to the request
+sent and the response received) for the IAM engineer; the values the agent fills in for the application owner. When
+a participant writes while the agent is busy, the agent's reply appears at once with a status saying what it is
+finishing first and that this message is next.
 
 **Why this priority**: Separate threads keep each person's instructions readable while the read-only view of the
 other thread keeps the shared visibility that turns two hand-offs into one conversation. The onboarding can still
 succeed (more slowly) without it.
 
-**Independent Test**: With both participants signed in on separate devices, a message one of them sends in their own
-thread appears, within 2 seconds, in the read-only copy of that thread on the other screen; the agent's request to
+**Independent Test**: With both participants signed in on separate devices, a message the application owner sends
+appears within 2 seconds in the read-only copy of their thread on the IAM engineer's screen, and an IAM engineer's
+message appears in the application owner's hidden-thread bar once it is opened; the owner's screen shows only their
+own thread until then; the agent's request to
 the other person appears in that person's thread with a relay note in the first thread; status changes appear on
 both screens without refreshing.
 
 **Acceptance Scenarios**:
 
 1. **Given** both participants are in the same session, **When** the IAM engineer sends a message in their thread,
-   **Then** it appears in the IAM engineer's thread on the application owner's screen (read-only, labelled with the
-   IAM engineer's name) within 2 seconds, and vice versa.
+   **Then** it is not shown on the application owner's screen unless they have opened the IAM engineer's thread, in
+   which case it appears there (read-only, labelled with the IAM engineer's name) within 2 seconds; **When** the
+   application owner sends a message, **Then** it appears in the application owner's thread on the IAM engineer's
+   screen within 2 seconds.
 2. **Given** the IAM engineer's order needs something from the application owner (e.g. a read-only check after a
    failed connection check), **When** the agent replies, **Then** it reports the result in the IAM engineer's thread,
    posts the request in the application owner's thread, and adds a relay note in the IAM engineer's thread saying
    what it asked and of whom.
-3. **Given** a participant views the other participant's thread, **When** they try to write there, **Then** they
-   cannot: that thread is marked "View only" with no message box, and a note says to ask the agent in their own
+3. **Given** a participant views the other participant's thread (always on the IAM engineer's screen, once opened on
+   the application owner's), **When** they try to write there, **Then** they cannot: that thread is marked "View only" with no message box, and a note says to ask the agent in their own
    thread to relay a message.
 4. **Given** the agent is waiting on one participant and is not busy, **When** the other participant sends a message
    in their own thread, **Then** their thread shows the waiting banner naming who the agent is waiting for, and the
    agent answers the new message straight away rather than holding it until the awaited participant responds.
-5. **Given** a participant joins or rejoins a session in progress, **When** their screen opens, **Then** both threads
-   show their full history and the current status.
+5. **Given** a participant joins or rejoins a session in progress, **When** their screen opens, **Then** every thread
+   on it shows its full history (on the application owner's screen: their own thread, with the IAM engineer's thread
+   collapsed again) and the current status.
 6. **Given** each participant writes only in their own thread, **When** an application owner tries to order a
    SailPoint change, **Then** the agent declines in the application owner's thread and explains that SailPoint
    changes are ordered by the IAM engineer.
@@ -187,10 +212,39 @@ both screens without refreshing.
    **Then** their reading position is kept and they are told that new messages are below, with one action to jump to
    the newest.
 9. **Given** the agent asks the application owner to do something and waits for them, **When** either participant
-   looks at their screen, **Then** both threads on both screens show the waiting banner directly above the message
+   looks at their screen, **Then** every thread on screen shows the waiting banner directly above the message
    box (or the view-only note): in the application owner's own thread it says the agent is waiting for them and what
    to do ("Waiting for you: run step 4 and paste the output"); in the IAM engineer's threads it names the application
-   owner and what they are doing; the banner disappears in all four places as soon as the wait ends.
+   owner and what they are doing (also in the application owner's opened copy of it); the banner disappears everywhere
+   as soon as the wait ends.
+10. **Given** the agent is busy answering the IAM engineer, **When** the application owner sends a message, **Then**
+    within 1 second an agent reply appears under it in the owner's thread, on both screens, with a status such as
+    "Received. I'm finishing the IAM engineer's request first; yours is next"; when the agent starts on it the status
+    changes to what it is doing (e.g. "Checking your output…"); the full answer then replaces the status in the same
+    place. No message is ever shown with only a "queued" label.
+11. **Given** two messages are already waiting, **When** a third arrives, **Then** its status says how many are ahead
+    of it, and each status updates as the ones ahead are answered.
+12. **Given** a session in progress, **When** either participant looks at the plan, **Then** both see the same steps
+    in the same order, each with who does it and its state (to do, in progress, done, failed, blocked with a reason),
+    a "x of y done" count and the next step highlighted; when the agent finishes a step, it is marked done on both
+    screens within 2 seconds.
+13. **Given** a connection check fails because of the application's trust, **When** the agent diagnoses it, **Then**
+    it adds a step to the plan (e.g. "Fix the role's trust") assigned to the application owner, with a one-line
+    reason, and the checks after it show as blocked until it is done.
+14. **Given** the SailPoint action record lists several entries of the same kind (e.g. three connection checks),
+    **When** the IAM engineer looks at the list, **Then** each entry shows its outcome in one line (e.g. "passed · 3
+    accounts read" or the first line of the error); **When** they open an entry, **Then** a dialog shows the request
+    the agent sent (action, source, the fields and values sent), the response (result, duration, task identifiers and
+    their final state, counts read, the error text and the agent's diagnosis if it failed) and who ordered it, why and
+    when, with a link to the message that ordered it, all masked. The application owner has no action record or
+    dialog; they see the outcome in the plan and in relay notes.
+15. **Given** the application owner's screen, **When** it opens, **Then** it shows only their own thread at full width
+    and a collapsed bar "IAM engineer ↔ Agent (hidden) · Show"; **When** they choose Show, **Then** the IAM engineer's
+    thread opens view only, live, with the waiting banner if any; **When** they hide it or reload the page, **Then**
+    it is collapsed again.
+16. **Given** the IAM engineer's screen with both threads, **When** they scroll either thread to a point in time,
+    **Then** the other thread scrolls to the message nearest that time, and both show time dividers at the same
+    times; **When** they turn Sync off, **Then** each thread scrolls on its own until they turn it back on.
 
 ---
 
@@ -267,8 +321,49 @@ each SailPoint change the ordering user, time and result.
    owner screen and cannot open the IAM engineer screen.
 2. **Given** wrong credentials, **When** a user tries to sign in five times in a row, **Then** further attempts on that
    account are blocked for 15 minutes and the attempts are recorded.
-3. **Given** a finished session, **When** either participant opens it, **Then** they see the full conversation,
-   uploaded screenshots, status history and the list of SailPoint changes with who ordered each.
+3. **Given** a finished session, **When** either participant opens it, **Then** they see their conversation (and,
+   as on the live screen, the other thread: always for the IAM engineer, on request for the application owner),
+   uploaded screenshots, status history and the plan as it ended; the IAM engineer also sees the list of SailPoint
+   changes with who ordered each and their details.
+4. **Given** a finished session, **When** a participant tries to write in it, **Then** they cannot: the screen says
+   the session is finished and that an admin can reopen it.
+
+---
+
+### User Story 8 - Admin reopens a session or hands it to another person (Priority: P2)
+
+An onboarding often outlives one sitting or one person: a session is finished too early, a source has to be
+re-checked weeks later, or a participant goes on leave, changes team or is disabled. An admin IAM engineer can see
+every session, reopen a finished one, and hand either participant's place to another active user with the same
+role. The new participant opens the session and finds the full history of both threads, the plan and the SailPoint
+action record, and carries on where it stopped.
+
+**Why this priority**: Without it a finished or orphaned session is a dead end and the onboarding has to start
+again from nothing, losing its history and audit trail. Single, uninterrupted onboardings do not need it.
+
+**Independent Test**: As an admin, reopen a finished session and hand the application owner's place to another
+application owner; sign in as that new owner, see the full history and the plan, send a message and get an answer;
+sign in as the previous owner and find the session gone from their list.
+
+**Acceptance Scenarios**:
+
+1. **Given** an admin, **When** they open the admin area, **Then** they see all sessions (open and finished) with
+   connector type, tenant, participants, status and last activity, and can reopen or hand over each one; they do not
+   get a message box in any session.
+2. **Given** a finished session, **When** an admin reopens it, **Then** it is open again, its history is no longer
+   due for deletion, both participants see it in their lists, and the agent continues from the current plan step.
+3. **Given** an open or finished session, **When** an admin hands the application owner's place (or the IAM
+   engineer's) to another active user with that role, **Then** the new user sees the session with the full history
+   of both threads, the plan and the action record; the previous user loses access at once, including an open
+   screen; and both threads show a note naming who handed which place to whom.
+4. **Given** a handover, **When** anyone reads the older messages, **Then** they still show the name of the person
+   who wrote them; new messages in that thread show the new participant's name.
+5. **Given** a handover target who is disabled, has the other role, or already holds the other place in that session,
+   **When** the admin picks them, **Then** the handover is refused with the reason.
+6. **Given** any reopen or handover, **When** an auditor reads the record, **Then** it names the admin, the session,
+   the previous and new participant and the time.
+7. **Given** a user who is not an admin, **When** they look for reopen or handover, **Then** neither is offered and a
+   direct attempt is refused.
 
 ---
 
@@ -346,8 +441,27 @@ that fit that status and their role; picking one and sending it gives the same r
 - The agent has no specific suggestions for the current point (for example right after an unexpected error): the
   thread still shows at least three general suggestions for that role ("What is left to do?", "Explain the last
   message", "Show me the current status").
+- The application owner opens the IAM engineer's thread while the agent is writing there: the reply in progress
+  streams in as on the IAM engineer's screen; hiding it again does not affect the agent or the IAM engineer.
+- One thread is much longer than the other, or silent for a long stretch: with Sync on, the quieter thread stays on
+  its nearest earlier message and a time divider shows the gap; it never jumps to an unrelated end of its history.
 - A suggestion would need a value the session does not know, or a secret: it is not offered; suggestions never
   contain or ask for credentials.
+- The agent fails or times out on a message that already shows a status reply: the status turns into the error
+  reply ("I couldn't finish that…") in the same place; it never stays on "Received" or "Working on it".
+- Several messages wait at once, from one or both participants: each shows its own status reply with how many are
+  ahead; they are answered in arrival order.
+- The agent's work goes beyond the playbook (e.g. a fix, a retry, an extra check): it adds the step to the plan with a
+  reason rather than doing it off-plan; a step that is no longer needed is marked skipped with a reason, and a done
+  step is never removed.
+- A participant is disabled while their session is open: the session stays open and readable to the other
+  participant; an admin hands the disabled user's place to someone else (FR-033).
+- An admin hands a place over while the agent is answering: the handover takes effect when that answer finishes, so
+  the answer is never cut off or shown to the wrong person.
+- An admin reopens a session whose source was deleted in SailPoint in the meantime: the agent finds this on its next
+  SailPoint read, marks the affected plan steps failed with the reason, and tells the IAM engineer.
+- An action record from before response details were kept: its dialog shows the request and result it has, and
+  "not recorded" for the missing details. An action still running shows as running and fills in when it finishes.
 
 ## Requirements *(mandatory)*
 
@@ -359,7 +473,8 @@ that fit that status and their role; picking one and sending it gives the same r
   exactly one role: *Application owner* or *IAM engineer*.
 - **FR-002**: An IAM engineer account MAY carry an *admin* flag. Admin IAM engineers MUST be able to create, disable
   and reset accounts, assign their role and admin flag, register tenants with their SailPoint service credential
-  (FR-025); other users MUST NOT. Application owner accounts
+  (FR-025), list all sessions, reopen finished sessions (FR-032) and hand a session place to another user (FR-033);
+  other users MUST NOT. Application owner accounts
   can never be admins. There is no self-registration; the first admin account is created when the system is
   installed. Admin actions are recorded like sign-ins (FR-004).
 - **FR-003**: The system MUST show each role its own screen and MUST NOT let a user open the other role's screen or
@@ -401,21 +516,34 @@ that fit that status and their role; picking one and sending it gives the same r
 
 **Onboarding sessions and conversation threads**
 
+- **FR-031**: The session's IAM engineer MUST be able to finish a session. A finished session is read-only for both
+  participants (the screen says so and that an admin can reopen it) and its history is kept for the retention period.
+- **FR-032**: An admin MUST be able to reopen a finished session: it becomes open again, its history is no longer due
+  for deletion, both participants can write again, and the agent continues from the current plan step.
+- **FR-033**: An admin MUST be able to hand the IAM engineer's or the application owner's place in an open or finished
+  session to another active user with that role who does not hold the other place in that session. The previous user
+  MUST lose access at once (an open screen included); the new user MUST see the full history of both threads, the
+  plan and the action record; earlier messages keep their author's name; both threads MUST show a note naming who
+  handed which place to whom. A handover requested while the agent is answering takes effect when that answer ends.
+  Every reopen and handover MUST be recorded with the admin, session, previous and new participant and time.
 - **FR-005**: An IAM engineer MUST be able to create an onboarding session by choosing an available connector type and
   a tenant, filling in the details that type requires (for AWS SaaS: source name, source owner, AWS management account,
   accounts in scope, region, optional AI-agent discovery with regions), and inviting one application owner to it.
 - **FR-006**: Each session MUST have two **threads**, one per participant (the IAM engineer's and the application
   owner's), each holding that participant's messages and the agent's messages to them, in order. Each screen MUST
-  show, under "Conversations", the participant's own thread with a message box, and the other participant's thread
-  live and **view only** (no message box, marked "View only", with a note to ask the agent to relay a message).
+  show, under "Conversations", the participant's own thread with a message box. The IAM engineer's screen MUST also
+  show the application owner's thread beside it, live and **view only** (no message box, marked "View only", with a
+  note to ask the agent to relay a message). The application owner's screen MUST show only their own thread, with the
+  IAM engineer's thread in a collapsed bar that opens it view only and live (as above) and that is collapsed again
+  whenever the screen is opened; hiding it is a display default, not a permission: the application owner may read it.
   Every message is labelled with its speaker and time.
 - **FR-006a**: Messages from both threads MUST go into one queue per session and be handled one at a time in arrival
   order, each with the full history of **both** threads (including the other participant's latest messages and
-  actions). A message that arrives while the agent is busy MUST be shown as "queued" in its thread, on both screens,
-  and answered next; no message type jumps the queue. "Queued" means only that the agent is busy with another
-  message: waiting for the other participant never holds a message back. A participant's thread MUST say when the
+  actions). A message that arrives while the agent is busy MUST get a status reply at once (FR-006h) and be answered in
+  turn; no message type jumps the queue. Being busy with another message is the only reason a message waits:
+  waiting for the other participant never holds a message back. A participant's thread MUST say when the
   agent is waiting on the other participant, as information only.
-- **FR-006b**: Agent replies MUST stream into their thread on both screens as they are written, and while the agent
+- **FR-006b**: Agent replies MUST stream into their thread, on every screen showing that thread, as they are written, and while the agent
   works on SailPoint or reads a screenshot it MUST show a progress line in that thread saying what it is doing (e.g.
   "checking the source in SailPoint…").
 - **FR-006c**: The agent MUST answer in the thread of the participant who wrote, and MUST post anything the other
@@ -425,11 +553,12 @@ that fit that status and their role; picking one and sending it gives the same r
   wrong thread. News that concerns both (for example all checks passed, or a SailPoint step failed) MUST go in full
   in the thread of the participant it belongs to (SailPoint results: the IAM engineer's) with a one-line relay note
   in the other thread, never the full text in both.
-- **FR-006d**: Each screen MUST show, beside the threads, the panel for its role: for the IAM engineer, the source
-  details (connector type, name, owner, tenant, the type's details, External ID and access) and the SailPoint action
-  record with who ordered each change; for the application owner, the connector type's setup steps in order, each
-  marked read-only or change and shown as pending, current, done or failed, and the session values the agent fills
-  into the instructions. The session header on both screens shows the connector type, the onboarding status
+- **FR-006d**: Each screen MUST show, beside the threads, the shared plan (FR-008a) and the panel for its role: for
+  the IAM engineer, the source details (connector type, name, owner, tenant, the type's details, External ID and
+  access) and the SailPoint action record with who ordered each change and its details (FR-020a), shown to the IAM
+  engineer only; for the
+  application owner, the session values the agent fills into the instructions, with the plan's application-owner
+  steps (each marked read-only or change) shown first. The session header on both screens shows the connector type, the onboarding status
   (FR-008) and whether the other participant is online.
 - **FR-006e**: Each participant's own thread MUST offer at least three **suggested messages** next to its message
   box, chosen for that participant's role and the current point in the session: answers to what the agent has just
@@ -443,22 +572,47 @@ that fit that status and their role; picking one and sending it gives the same r
   scrollbar, so a long conversation never pushes the thread's header, waiting banner, suggestions or message box out
   of view. A thread MUST open at its newest message and MUST stay at the newest message as new ones arrive while the
   participant is at the bottom; if the participant has scrolled up, the reading position MUST be kept and a "new
-  messages" cue MUST offer a jump to the newest. Both threads on a screen scroll independently.
-- **FR-006g**: While the agent is waiting on a participant, both threads on both screens MUST show a **waiting
-  banner** between the messages and the message box (or the view-only note): a highlighted strip, set apart from the
+  messages" cue MUST offer a jump to the newest. On the IAM engineer's screen the two threads scroll in step by time
+  (FR-006i); elsewhere each thread scrolls on its own.
+- **FR-006g**: While the agent is waiting on a participant, every thread shown on either screen (including the
+  application owner's opened copy of the IAM engineer's thread) MUST show a **waiting banner** between the messages and the message box (or the view-only note): a highlighted strip, set apart from the
   messages by colour and a clock icon, with a bold lead that names who is waited on, followed by what they need to
   do. Its wording fits the viewer: the awaited participant sees "Waiting for you:" and their next step; the other
   participant sees the awaited person's name and what the agent is waiting for. The banner is announced to screen
   readers as a status, has at least 4.5:1 text contrast, is visible without scrolling, and disappears everywhere as
   soon as the wait ends. It is information only and never says that messages will be held (FR-006a).
+- **FR-006h**: Every message a participant sends MUST get the agent's reply in its thread, on every screen showing that thread, within
+  1 second, first as a **status**: while other messages are ahead, "Received" with what the agent is finishing first
+  (the other participant's request or the sender's earlier message) and how many messages are ahead; once the agent
+  starts on it, what it is doing (the progress line of FR-006b); then the answer itself, which replaces the status
+  in the same place as it streams in. If the agent fails, the status becomes the error reply. The status is written
+  by the system, not the agent, so it costs no extra agent work and appears even when the agent is slow. A message
+  MUST never be shown with only a "queued" label.
+- **FR-006i**: On the IAM engineer's screen the two threads MUST scroll in step by time: scrolling either one MUST
+  bring the other to the message nearest the same time (or, when that thread has nothing then, to its nearest
+  earlier message), and both MUST show time dividers at the same times. Following the newest message (FR-006f)
+  applies to both together. A visible "Sync" control MUST let the IAM engineer scroll the threads separately; it is
+  on by default and the choice is kept for that user on that browser. When the threads are stacked on a narrow
+  screen, they scroll separately.
 - **FR-007**: Users MUST be able to attach screenshots (common image formats, up to 10 MB each) to a message; the agent
   MUST be able to read text and errors in them.
 - **FR-008**: The session MUST show the connector type and the current onboarding status — application ready, source
   created, source configured, connection check, aggregation, Test Connection — each as not started / in progress /
   passed / failed, updated live on both screens. The label of the first step MAY be specialised by connector type
-  (for AWS SaaS: "AWS role ready").
+  (for AWS SaaS: "AWS role ready"). These six are a summary of the plan (FR-008a).
+- **FR-008a**: Each session MUST have one **plan**, shown the same on both screens and updated live: every step of the
+  onboarding from start to finish, in order, each with a title, who does it (application owner, IAM engineer, or the
+  agent), whether it is read-only or a change, and a state (to do, in progress, done, failed, skipped, or blocked with
+  the reason), plus a count of steps done out of all steps and the next step highlighted.
+- **FR-008b**: The plan MUST start from the connector type's playbook when the session is created (for AWS SaaS: the
+  AWS owner's setup steps, the IAM engineer's order, source creation and configuration, connection check,
+  aggregation, Test Connection). The agent MUST mark steps as it works, and MAY add a step (e.g. a fix) or mark one
+  skipped, each with a one-line reason shown in the plan; it MUST NOT remove a step or undo a done step without a
+  reason shown in the plan. The agent MUST be able to answer "what is left?" from the plan.
+- **FR-008c**: The six milestones of FR-008 MUST follow from the plan steps they cover, so the header and the plan
+  never disagree.
 - **FR-009**: The system MUST keep the full session history (both threads with their messages and relay notes,
-  screenshots, status changes, SailPoint actions) and let both participants reopen it later.
+  screenshots, status changes, the plan, SailPoint actions) and let both participants read it later.
 
 **Application owner guidance (application side)**
 
@@ -500,8 +654,15 @@ that fit that status and their role; picking one and sending it gives the same r
   IAM engineer's order.
 - **FR-019**: The agent MUST refuse SailPoint change requests from the application owner (other than the check reruns
   of FR-016a) and anything outside the session's connector type and onboarding, and say why.
-- **FR-020**: Every SailPoint change MUST be recorded with: what changed, on which source, who ordered it, when, and the
-  result; the record is visible to both participants.
+- **FR-020**: Every SailPoint change MUST be recorded with: what changed, on which source, who ordered it, why (order
+  or the application owner's confirmation, FR-016a), when, how long it took, the request sent (the fields and values,
+  masked, never credentials), the response received (result, task identifiers and their final state, key counts such
+  as accounts read, and the error text, masked) and the agent's diagnosis when it failed; the record and its details
+  are shown to the IAM engineer only (the application owner follows results through the plan and relay notes).
+- **FR-020a**: Each entry in the SailPoint action record MUST show its outcome in one line (e.g. "passed · 3 accounts
+  read", "failed · " and the error's first line), and opening it MUST show a dialog with the request, the response and
+  the context of FR-020, a link to the message that ordered it, and a way to copy the details as text. The dialog
+  closes with Escape, a close button or a click outside. A running action shows as running and fills in when it ends.
 
 **Troubleshooting**
 
@@ -544,20 +705,29 @@ that fit that status and their role; picking one and sending it gives the same r
   settings, checks, known failures).
 - **Onboarding session**: one application onboarded with one connector type into one tenant; source name, owner,
   tenant, connector type, the type's details (for AWS SaaS: management account, accounts in scope, region, discovery
-  options), participants (one IAM engineer, one application owner), created/finished time, current status.
+  options), participants (one IAM engineer, one application owner), status (open / finished), created, finished and reopened
+  times, the history of handovers (who handed which place from whom to whom, when).
 - **Thread**: one participant's conversation with the agent in a session; session, participant (IAM engineer or
   application owner). Each session has exactly two; each is readable by both participants, writable only by its own.
 - **Message**: one entry in a thread; thread, speaker (the thread's participant or the agent), kind (message or
-  relay note; a relay note names the other thread it refers to), text after masking, attachments, queue state, time.
+  relay note; a relay note names the other thread it refers to), text after masking, attachments, time; for an agent
+  reply, its status while it waits or is being written (received with messages ahead, working on it, answered,
+  failed).
 - **Attachment**: an uploaded screenshot; message, image, upload time, secret check result (passed / held).
 - **Suggested message**: one offered question or answer in a participant's thread; thread, text, kind (answer, order,
   question), the point in the session it was offered for. Not stored as a message unless the participant sends it.
 - **Onboarding step**: one tracked milestone (application ready, source created, configured, connection check,
   aggregation, Test Connection); state and time of each change.
-- **SailPoint action record**: one change the agent made in SailPoint; session, source, action, ordered by, time,
-  result, task identifiers.
-- **Application setup step**: one instruction given to the application owner; instruction (for AWS SaaS: command),
-  read-only or change, expected result, confirmed or not.
+- **SailPoint action record**: one change the agent made in SailPoint; session, source, action, ordered by, trigger,
+  the message that ordered it, time, duration, request sent (masked), response received (masked: result, task
+  identifiers and final states, counts, error text), the agent's diagnosis when it failed.
+- **Plan step**: one step of the session's plan; title, who does it (application owner, IAM engineer, agent),
+  read-only or change, state (to do, in progress, done, failed, skipped, blocked), reason (for added, skipped,
+  blocked or failed steps), which milestone it counts towards, order, time of each change. Application-owner steps
+  also carry the instruction given (for AWS SaaS: command) and its expected result. Replaces the former "application
+  setup step".
+- **Session handover**: one change of a participant's place; session, place (IAM engineer or application owner),
+  previous user, new user, admin, time.
 
 ## Success Criteria *(mandatory)*
 
@@ -568,8 +738,9 @@ that fit that status and their role; picking one and sending it gives the same r
   available connector type (v1: AWS SaaS).
 - **SC-002**: The application owner can follow 100% of the agent's setup instructions as given, with no values to look
   up or fill in by hand, for the values the session knows.
-- **SC-003**: A message, relay note or status change from one participant's side appears in the matching thread or
-  header on the other participant's screen within 2 seconds in 95% of cases.
+- **SC-003**: A message, relay note or status change from one participant's side appears in the matching thread, plan
+  or header on the other participant's screen within 2 seconds in 95% of cases (for the application owner, IAM
+  engineer's thread messages count only while that thread is opened).
 - **SC-003a**: The first words of the agent's reply appear within 5 seconds of a message being handled in 95% of cases
   (long SailPoint tasks such as aggregation excepted; their progress line appears within 5 seconds instead).
 - **SC-004**: Zero SailPoint credentials and zero unmasked application or SailPoint secrets appear in any screen,
@@ -591,9 +762,23 @@ that fit that status and their role; picking one and sending it gives the same r
   a working source by picking suggestions and pasting command output only, without typing any other message.
 - **SC-012**: With 200 messages in each thread, the message box, suggestions and waiting banner of every thread stay
   visible without scrolling the page, and each thread can be scrolled from its newest to its oldest message.
-- **SC-013**: In 100% of tested waiting states the waiting banner appears in both threads on both screens within
+- **SC-013**: In 100% of tested waiting states the waiting banner appears in every thread shown on either screen within
   2 seconds and is gone within 2 seconds of the wait ending; in a usability trial, at least 4 of 5 participants can
   say who the agent is waiting for, and what that person must do, within 5 seconds of looking at their screen.
+- **SC-014**: For 100% of messages sent in testing, the sender sees the agent's status reply within 1 second, and no
+  message is ever shown with only a "queued" label; in a usability trial, at least 4 of 5 participants who write
+  while the agent is busy can say, without asking, that their message was received and is answered next.
+- **SC-015**: At every point in a tested onboarding both screens show the same plan and count within 2 seconds of a
+  change, and at least 4 of 5 participants in a usability trial can say what is done and what is left within
+  10 seconds of looking at their screen.
+- **SC-016**: An admin can reopen a finished session, or hand a place to another user, in under 1 minute; the new
+  participant can continue the onboarding without losing any history, and the previous one has no access afterwards.
+- **SC-017**: For 100% of SailPoint actions, the IAM engineer can see what was sent and what SailPoint returned in no
+  more than 2 clicks, with zero secrets shown.
+- **SC-018**: With at least 100 messages in each thread, scrolling either thread on the IAM engineer's screen brings
+  the other to within one message of the same time in 100% of tests; in a usability trial, at least 4 of 5 IAM
+  engineers can say what the application owner was doing at the time of a chosen message of their own within
+  10 seconds.
 
 ## Assumptions
 
@@ -610,14 +795,17 @@ that fit that status and their role; picking one and sending it gives the same r
   a session.
 - For AWS SaaS, the AWS organization has all features enabled and the AWS owner can work in the management account; if
   not, the agent says so and limits the setup to the management account.
-- One session has exactly one IAM engineer and one application owner; several sessions may run at the same time.
+- One session has exactly one IAM engineer and one application owner at a time (an admin may hand either place to
+  another user, FR-033); several sessions may run at the same time.
 - Picking a suggestion fills the message box rather than sending at once, so an IAM engineer's order is always a
   deliberate send (FR-016) and a participant can add details before sending. Suggestions come from the agent with
   each reply, with fixed role-and-status defaults when the agent offers none.
 - The two session screens follow the design canvas "ISC Onboarding Agent UI" (artboards "IAM engineer — session" and
   "Cloud engineer — same session", now the application owner's screen): header with status, role panel on the left,
   "Conversations" with the own thread and the other participant's view-only thread side by side. The canvas is the
-  visual reference; this spec states the behaviour.
+  visual reference; this spec states the behaviour. Where they differ, the spec wins: the application owner's screen
+  shows only their own thread (the IAM engineer's is hidden until opened), and the IAM engineer's two threads scroll
+  in step by time.
 - Accounts are few (a team, not a public service); local accounts seeded by admin IAM engineers are enough;
   single sign-on is out of scope for v1.
 - Session history is kept for 90 days, then deleted; action records follow the organization's audit retention.
@@ -630,3 +818,12 @@ that fit that status and their role; picking one and sending it gives the same r
   one fixed height per thread on a desktop screen); what matters is that the page never grows with the conversation.
 - The waiting banner's look (amber strip, clock icon, bold lead) comes from the updated design canvas; the spec
   fixes only that it stands out from messages, names who is waited on and for what, and meets the contrast rule.
+- Status replies are written by the system from what it knows (messages ahead, the agent's progress line), in the
+  viewer's language, so they need no extra agent call; the agent's own answer still comes in turn.
+- The starting plan comes from the connector type's playbook (FR-030), so a new connector type brings its own plan
+  steps; the agent's additions and skips are per session.
+- A reopened session keeps its tenant, connector type, source and details. Handing a place over is not a new
+  invitation: the admin picks from active users with that role. Admins manage sessions from the admin area and do
+  not chat in them.
+- Request and response details in the action record are the masked fields and results of the agent's SailPoint
+  calls, not raw network traffic.

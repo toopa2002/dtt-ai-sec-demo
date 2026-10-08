@@ -12,6 +12,9 @@ tenant, opens an AWS SaaS session, then:
   confirm: like trust, but the owner confirms the fix in their thread and the checks rerun under the IAM engineer's
          standing order (FR-016a): action records name the IAM engineer with the confirmation trigger.
 Prints a summary and exits non-zero on any failed expectation.
+
+Cost (Constitution IV): run against `dev.sh` with AGENT_MODEL=fake (the scripted model) it costs nothing; against a
+real agent it prints the expected Bedrock calls and cost before the first message.
 """
 
 import argparse
@@ -30,6 +33,9 @@ STUB = os.environ.get("ONB_STUB", "http://127.0.0.1:8099")
 os.environ.setdefault("MONGO_URI", "mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true")
 os.environ.setdefault("MONGO_DB", os.environ.get("ONB_DEV_DB", "onboarding_dev"))
 PASSWORD = "smoke-password-123"
+AGENT = os.environ.get("ONB_AGENT", "http://127.0.0.1:8092")
+CALLS = {"happy": 15, "trust": 25, "confirm": 30}  # model calls per scenario on the real model
+USD_PER_CALL = 0.004  # Claude Haiku 4.5 with prompt caching (research R27)
 FAILURES: list[str] = []
 
 
@@ -144,6 +150,15 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
         await db.close()
         return 0
 
+    try:
+        async with httpx.AsyncClient(timeout=5) as s:
+            model = (await s.get(f"{AGENT}/model")).json().get("model", "bedrock")
+    except (httpx.HTTPError, ValueError):
+        model = "unknown (assume real)"
+    if model != "fake":
+        calls = CALLS[scenario]
+        print(f"! Agent model: {model}. This run makes about {calls} Claude Haiku calls on Bedrock, "
+              f"about ${calls * USD_PER_CALL:.2f}. Use dev.sh with AGENT_MODEL=fake for a free run.")
     print("\n— application owner asks for the steps")
     reply = await say(owner, sid, "What do I need to set up in AWS first?", "application_owner")
     expect(reply["thread"] == "application_owner", "reply is in the application owner's thread")
@@ -184,7 +199,8 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
             await s.post(f"{STUB}/_stub/fix_trust")
         if scenario == "confirm":
             print("\n— owner confirms the fix in their thread (no new order from the IAM engineer)")
-            await say(owner, sid, "I have finished all the AWS setup steps, including the role trust. The role is ready.", "application_owner")
+            await say(owner, sid, "I have finished all the AWS setup steps, including the role trust. "
+                                  "The role is ready.", "application_owner")
             actions = (await iam.get(f"/sessions/{sid}/actions")).json()
             reruns = [a for a in actions if a["trigger"] == "application_owner_confirmation"]
             print("  reruns:", [(a["action"], a["result"], a["ordered_by"]["display_name"]) for a in reruns])

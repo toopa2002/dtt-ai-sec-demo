@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { agentDone, otherLog, otherThread, ownLog, ownThread, seed, send, signIn } from './helpers';
+import { agentDone, otherLog, otherThread, ownLog, ownThread, seed, send, signIn, openOther } from './helpers';
 
 // T104 / US3 (revised), SC-003: one thread per person, each shown live on the other screen (view only).
 test('each participant writes in their own thread and sees the other one live', async ({ browser }) => {
@@ -11,6 +11,7 @@ test('each participant writes in their own thread and sees the other one live', 
   await owner.goto(`sessions/${s.session_id}/iam`);
   await expect(owner).toHaveURL(new RegExp(`sessions/${s.session_id}/owner$`));
   await iam.goto(`sessions/${s.session_id}/iam`);
+  await openOther(owner); // collapsed on the owner's screen by default (FR-006)
   await expect(iam.getByRole('heading', { name: 'SailPoint actions' })).toBeVisible();
   await expect(iam.getByText(/online/).first()).toBeVisible();
 
@@ -35,7 +36,9 @@ test('each participant writes in their own thread and sees the other one live', 
   // A second message (from the other thread) while the agent answers the first waits in the queue, on both screens.
   const second = `And a second question ${Date.now()}`;
   await send(iam, second);
-  await expect(ownLog(iam).locator('article.msg', { hasText: second }).locator('.state', { hasText: /queued|agent is answering/ })).toBeVisible();
+  // FR-006h: its agent reply is there at once, right under it (a status, or the answer if the agent was quick).
+  await expect(ownLog(iam).locator('article.msg', { hasText: second })
+    .locator('xpath=following-sibling::article[contains(@class,"agent")][1]')).toBeVisible({ timeout: 1_000 });
   await expect(otherLog(owner).locator('article.msg', { hasText: second })).toBeVisible({ timeout: 2_000 });
   await agentDone(iam);
   // Each thread got at least its own reply; the agent may also pass a message on into the other thread (FR-006c).
@@ -44,6 +47,8 @@ test('each participant writes in their own thread and sees the other one live', 
 
   // Rejoin: a reload shows both threads again, labelled from this side.
   await owner.reload();
+  await expect(owner.getByRole('button', { name: /IAM engineer ↔ Agent/ })).toHaveAttribute('aria-expanded', 'false');
+  await openOther(owner);
   await expect(ownLog(owner).locator('article.msg', { hasText: text }).locator('.who')).toHaveText('You');
   await expect(otherLog(owner).getByText(second)).toBeVisible();
   // Both screens show the same threads: the owner's view of each thread matches the IAM engineer's.
@@ -77,4 +82,25 @@ test('the live stream recovers after a failed reconnect', async ({ browser }) =>
   const text = `After the outage ${Date.now()}`;
   await send(owner, text);
   await expect(otherLog(iam).getByText(text)).toBeVisible({ timeout: 5_000 });
+});
+
+// A proxy that holds the event stream back while the request itself succeeds (seen behind a TLS-inspecting corporate
+// proxy) must not leave the screen frozen: it long-polls the same events, with a few requests a minute.
+test('the screen keeps up by long-polling when a proxy holds the live stream back', async ({ browser }) => {
+  const s = seed();
+  const iam = await signIn(browser, s.iam, s.password);
+  const owner = await signIn(browser, s.owner, s.password);
+  await owner.route('**/events?*', () => undefined); // never answered, like a buffering proxy
+  let polls = 0;
+  owner.on('request', (r) => { if (r.url().includes('/events/poll')) polls++; });
+  await owner.goto(`sessions/${s.session_id}/owner`);
+  await openOther(owner);
+  await iam.goto(`sessions/${s.session_id}/iam`);
+  await expect.poll(() => polls, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect(owner.getByText('reconnecting', { exact: false })).toBeHidden();
+  const text = `Through the proxy ${Date.now()}`;
+  const sent = Date.now();
+  await send(iam, text);
+  await expect(otherLog(owner).locator('article.msg', { hasText: text }).first()).toBeVisible({ timeout: 3_000 });
+  console.log(`long-poll relay ${Date.now() - sent} ms`);
 });

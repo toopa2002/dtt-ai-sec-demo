@@ -16,4 +16,13 @@ test_connection:
   before_aggregation_hint: >-
     "req.input is null" before the first aggregation says nothing about the configuration: run the connection
     check and an aggregation first, then Test Connection again.
+# The plan step each milestone's set_step marks (research R22). A passed application_ready (the connection check
+# reached AWS through the role) also marks the application owner's remaining setup steps done.
+plan_step:
+  application_ready: confirm_role
+  source_created: create_source
+  configured: configure_source
+  connection_check: connection_check
+  aggregation: aggregation
+  test_connection: test_connection
 order: [create_source, configure_source, peek_accounts, start_aggregation, test_connection]

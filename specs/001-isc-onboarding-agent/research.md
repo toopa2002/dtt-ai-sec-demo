@@ -320,3 +320,192 @@ SC-010) and "suggested replies" (US7, FR-006e, SC-011).*
 - **Alternatives considered**: showing the banner only in the awaited person's thread (the spec wants both people to
   see who is waited on), a toast/notification (disappears; not visible on rejoin), deriving the reason from the last
   relay note (often longer than a line and phrased for the other person).
+
+## R21. Status replies instead of "queued" (FR-006h, US3 #10-11, SC-014)
+
+**Decision**: When the API accepts a participant message it also creates the agent's reply in the same thread at once:
+an agent message with `reply_to` = the participant message and `reply_state` = `received`, `ahead` = how many
+messages are before it in the session queue (queued or processing), and `status_text` written by the API from the
+queue ("Received. I'm finishing w.rakkiatngam's question first; yours is next." / "… 2 messages are ahead of
+yours."). Both go out as `message.created` in one write. When the turn starts, the reply goes to `working` and its
+status text follows the turn's progress lines; the turn's streamed text (`agent.delta`) and final text (`agent.message`)
+write into **this** message id, so the answer replaces the status in place. Each time a turn starts or ends, the API
+recomputes `ahead` for the replies still `received` and sends `reply.status` for those whose value changed. A failed
+turn (after the one retry) sets `reply_state = failed` with the existing error text. A turn that produces no text in
+the writer's thread (it only acted in the other thread) fills the reply with "Passed on to <name>." so no status is
+left behind. `queue_state` stays as the internal queue field; the browser stops showing it.
+
+**Rationale**: The status is pure queue information the API already has, so it costs no model call and appears in
+under a second (SC-014) even when AgentCore is slow. Writing the answer into the placeholder keeps one bubble per
+reply, so nothing jumps or duplicates when the answer arrives.
+
+**Alternatives considered**: An agent-written holding reply (extra Bedrock call per message, seconds of delay);
+answering threads in parallel (two turns could change SailPoint at once, rejected in FR-006a); a toast instead of a
+bubble (disappears, and the other screen never sees it).
+
+## R22. The shared plan (FR-008a-c, US3 #12-13, SC-015)
+
+**Decision**: `sessions.plan` is an embedded, ordered list of plan steps (≤ 40), seeded when the session is created from
+a new playbook file `playbooks/<id>/plan.yaml` (each step: `id`, `title`, `actor`, `kind` read-only/change,
+`milestone` it counts towards, and for application-owner steps the `instruction` and `expected` keys of `setup.md`).
+The agent changes it only through one new tool, `update_plan(ops)`, with ops `set_state`, `add` (after a step, with a
+reason) and `skip` (with a reason); the API validates (no removal; `done` → anything else needs a reason; added steps
+get ids `x1`, `x2`…), stores, and sends `plan.updated` with the whole plan (small: ≤ 40 short rows). The ISC tools'
+existing `set_step` events now set the state of the plan step tied to that milestone (`checks.yaml` names it), and the
+API **derives** the six milestone states from the plan (any failed → failed; all done or skipped → passed; any done or
+in progress → in progress; else not started), so the header can never disagree with the plan (FR-008c). The count is
+"done of all steps not skipped"; the next step is the first not done or skipped, in order. `record_application_step`
+and the reply-metadata step list are retired: the owner's steps are the plan's `actor = application_owner` rows.
+Existing sessions are migrated once: plan seeded from the playbook, states set from their milestones (like R18).
+
+**Rationale**: One list owned by the server keeps both screens identical (SC-015) and gives the agent a single,
+checkable way to say what is left (FR-008b). Deriving milestones removes the second source of truth that let the old
+owner step list drift ("all but the last done").
+
+**Alternatives considered**: Letting the agent rewrite the plan wholesale each turn (unbounded, easy to lose done
+steps); keeping milestones and steps independent (they disagree); a plan per participant (rejected in clarification).
+
+## R23. Admin reopen and handover (FR-031-FR-033, US8, SC-016)
+
+**Decision**: New admin endpoints: `GET /admin/sessions` (all sessions with participants, status, plan count, last
+activity), `POST /admin/sessions/{id}/reopen`, `POST /admin/sessions/{id}/handover {place, user_id}`.
+- **Reopen** reverses finish: `status = open`, clears `finished_at` and `expires_at` on the session and on its
+  messages, events and attachments, sets `reopened_at`, posts a `system_note` in both threads, records
+  `session_reopened` in `audit`, sends `session.updated`.
+- **Handover** checks the target (active, same role, not holding the other place), then swaps
+  `iam_engineer_id` / `application_owner_id`, appends to `sessions.handovers`, posts a `system_note` in both threads
+  ("Admin m.admin handed the application owner's place from p.nattapong to t.somchai"), records `session_handover`,
+  and sends `participant.changed {place, user}` to everyone plus `access.revoked` to the previous user only. An
+  IAM-engineer handover also clears `check_order` (the new engineer orders checks themselves). If `turn_lock` is held,
+  the handover is stored as `pending_handover` and applied by the turn worker right after the turn ends (edge case).
+- **Access**: every request already goes through `participant_session`; the SSE and long-poll loops re-check
+  participation on `participant.changed` and close the previous user's stream, and the browser sends them to the
+  session list on `access.revoked`.
+- Old messages keep their author: names come from `speaker_user_id`, which is never rewritten.
+
+**Rationale**: Uses the existing access check as the single gate, so a handed-over user loses access everywhere at
+once (SC-016). Deferring during a turn keeps a reply from landing with someone who can no longer read it.
+
+**Alternatives considered**: Adding the new person alongside the old (breaks "one per role" and FR-005); copying the
+session into a new one (loses audit continuity and the SailPoint source link).
+
+## R24. SailPoint action details (FR-020, FR-020a, US3 #14, SC-017)
+
+**Decision**: The agent's `action` event gains `action_ref` (agent-made, unique per turn), `request` (the masked fields
+and values sent, replacing `request_summary`), `response` (`result`, `task_ids` with final states, `counts`
+{`accounts`, `entitlements`}, masked `error`), `duration_ms`, and `started_at`. A long action (aggregation) is sent
+first with `result = running`, then again with the same `action_ref` when it ends; the API upserts by
+(`turn_id`, `action_ref`) and sends `action.recorded` then `action.updated`. A new agent tool `note_diagnosis(text)`
+attaches the agent's one-paragraph diagnosis to the turn's last failed action. The API stores `order_message_id` (the
+message that started the turn) and computes the one-line `outcome` ("passed · 3 accounts read", "failed · " + the
+error's first line, "running"). `GET /sessions/{id}/actions` and the new `GET /sessions/{id}/actions/{actionId}` are
+**IAM engineer only** (403 for the application owner), and `action.*` events are sent only to the session's IAM
+engineer: they are journaled with `visible_to: "role:iam_engineer"`, resolved against the current holder of that place
+at delivery, so after a handover (R23) the new engineer replays them and the previous one does not. The same role form
+replaces user ids for the other one-person events (`suggestions.updated`); `attachment.held` stays addressed to its
+uploader. Records from before this change show "not recorded" for missing parts.
+
+**Rationale**: Everything the dialog shows is already known to the tool when it calls SailPoint; recording it at the
+source avoids a second, lossy reconstruction. Masking happens in the API on the way in, like every other text.
+
+**Alternatives considered**: Logging raw HTTP traffic (would carry tokens and is not what the spec asks); building the
+details from the agent's chat text (unreliable).
+
+## R25. The application owner's view (FR-006, US3 #1, #5, #15)
+
+**Decision**: Browser only. The owner screen lays out its own thread full width and renders the IAM engineer's thread
+inside a collapsed `<details>`-like bar ("IAM engineer ↔ Agent (hidden) · Show", a real button with `aria-expanded`)
+that is collapsed on every load and never remembered. The API is unchanged: the owner may still read both threads
+(clarification: a display default, not a permission). While collapsed, events for that thread still update the
+store, so opening it shows the current state at once, mid-stream included. The owner screen drops the SailPoint actions
+panel and never calls the actions endpoint (R24 makes it 403).
+
+**Rationale**: Matches the clarification exactly and adds no server state.
+
+**Alternatives considered**: A per-user saved preference (the answer says collapsed on every visit); hiding it on the
+server (a permission change the user did not choose).
+
+## R26. Time-synced threads on the IAM engineer's screen (FR-006i, US3 #16, SC-018)
+
+**Decision**: Browser only, in the session screen that hosts both threads.
+- **Dividers**: the screen builds one divider list from both threads: each distinct minute (`HH:MM`, local time) in
+  which either thread has a message. Each thread renders every divider; consecutive dividers with no messages in that
+  thread collapse into one "No messages from HH:MM to HH:MM" line. So the same times appear in both logs.
+- **Sync**: each message and divider carries its time. On a user scroll in one log (not a programmatic one: a guard
+  flag ignores the scroll events it causes), throttled to one animation frame, the screen takes the time of the top
+  visible item and scrolls the other log so its last item at or before that time is at the top. Follow-newest
+  (FR-006f) applies to the pair: when the scrolled log is at the bottom, both stick to the bottom.
+- **Toggle**: a "Sync by time" button with `aria-pressed`, on by default, stored per user in `localStorage`
+  (`onboarding.sync.<userId>`, wrapped in try/catch). Below the stacking width (R19, ~1100 px) sync is off.
+
+**Rationale**: Scroll alignment by timestamp meets "within one message" (SC-018) without changing the layout or the
+data. Minute dividers keep the two logs visually comparable even when one is quiet.
+
+**Alternatives considered**: Row-aligned lanes on a shared axis (large gaps with long messages, rejected in
+clarification); one merged timeline (drops the side-by-side view).
+
+## R27. Prompt caching for every model call (Constitution IV)
+
+**Decision**: The agent splits its system prompt into a **static** block (the role-independent rules in
+`prompts/en/system.md` plus the connector's playbook documents `setup.md`, `failures.md`, `collisions.md`) and a
+**dynamic** block (who wrote, the role gate, session values, plan, waiting state, check order). Cache breakpoints
+(`cache_control: {"type": "ephemeral"}`, 5-minute cache) go on: the last tool definition, the static system block, and
+the last content block of the conversation on every tool round of a turn (a rolling breakpoint, so round *n* reads the
+prefix written by round *n-1*). Order follows the API's cache prefix rule: tools → static system → dynamic system →
+messages. The model reports `cache_creation_input_tokens` and `cache_read_input_tokens`; the agent sums them with the
+plain input and output tokens and sends one `usage` event per turn, which the API records as metrics (R14) and the
+evals use for their cost report (R29). The screenshot secret check stays uncached (short prompt, one call).
+
+**Rationale**: About 7 k of the ~9 k input tokens per call are the same for every call of a role (static prompt,
+playbook, tool definitions), and a turn makes up to 8 calls that re-send the growing conversation. Cache reads cost
+about 10% of normal input and writes about 125%, so a typical 4-6 round turn costs roughly a third of today's,
+for production use and for every real-model test alike. The static part is above Claude Haiku 4.5's minimum cacheable
+length; the first test run checks that the cache is actually hit (non-zero `cache_read_input_tokens` from the second round on).
+
+**Alternatives considered**: Shortening the prompt (helps less and risks SC-005 accuracy); caching only the system
+prompt (misses the larger saving across tool rounds); a cheaper model (the diagnosis evals were tuned on Haiku 4.5).
+
+## R28. A scripted model for automated tests (Constitution IV)
+
+**Decision**: `run_turn` already accepts the model client as a parameter. Add `onboarding_agent/fake_model.py`, a
+**scripted model** with the same `messages.stream` / `messages.create` surface: it reads the last participant message,
+the role, the session state (source, steps, plan, waiting) and the stub scenario, and answers from
+`agent/tests/fake_model/script.yaml` — ordered rules of `{when: {role, text_matches, state…}, then: [text and tool
+calls]}` covering what the e2e specs and smoke scenarios do (create and check, ask the owner for output, diagnose the
+trust failure with `post_to_other_thread` + `set_waiting` + `update_plan`, rerun checks on the owner's confirmation,
+suggestions, relay a message, decline an owner's SailPoint order, answer "what is left?"). Everything else — the tool
+loop, the real tools against the ISC stub, the API, the browser — runs for real. The agent picks it with
+`AGENT_MODEL=fake` (dev stack only; the AgentCore image never sets it, and `fake` is refused when
+`ONBOARDING_ISC_BASE_URL` is not the local stub). `dev.sh` takes `AGENT_MODEL` (default `bedrock` for
+`make onboarding-dev`, a person's interactive use); `e2e.sh` and `smoke.py --scenario` start or restart the agent with
+`fake` unless `REAL_MODEL=1` is set, and print a banner with the expected real-model cost when it is.
+
+**Rationale**: The e2e and smoke suites test the product's plumbing (threads, events, plan, banners, scrolling,
+security gates), not the model's judgement; the model's judgement has its own gate (R29). A scripted model makes them
+free, faster and deterministic (the threads spec's one flaky step was model wording).
+
+**Alternatives considered**: Mocking at the API's `agent_client` (skips the agent's tool loop and real tools, which the
+e2e runs are meant to cover); recording and replaying real Bedrock responses (brittle against prompt changes);
+keeping real Bedrock with fewer runs (still pays per run, still flaky).
+
+## R29. Evals: smallest useful run, stated cost, no repeat without change (Constitution IV)
+
+**Decision**: `run_evals.py` and `evals.sh`:
+- **Default `--runs 3`** (a quick read on a change while working). **`--gate`** runs the SC-005 gate (10 runs, pass at
+  9/10) and is what `make onboarding-evals` runs.
+- **Estimate first**: before calling the model it prints "about N model calls, about $X" from cases × runs × the
+  average calls per turn and tokens per call (cached, Haiku 4.5 list prices, both kept as constants next to the model
+  id); `--estimate` prints only that and exits. After the run it prints the actual calls, tokens and cost from the
+  agent's `usage` events (R27).
+- **No repeat without change**: the gate computes a fingerprint (SHA-256 of `prompts/`, `catalog/playbooks/`, the
+  agent's tool definitions and loop source, the eval cases and the model id). A passing gate writes
+  `{fingerprint, result, at}` to `.run/evals-gate.json`; `make onboarding-evals` with an unchanged fingerprint prints
+  the last result and stops without calling the model; `--force` overrides and says so.
+- Eval cases still run in parallel (`--concurrency 4`).
+
+**Rationale**: Three full runs on 2026-10-07 cost about $29. With caching (R27) a full gate costs a few dollars, a
+default run well under one, and an unchanged prompt costs nothing.
+
+**Alternatives considered**: Dropping to fewer cases (loses SC-005 coverage); running the gate only in CI (there is no
+CI for this repo yet; the rule must hold locally); a hard spend cap inside the script (the budget alarm is the cap; the
+script's job is to make the cost visible and avoid waste).

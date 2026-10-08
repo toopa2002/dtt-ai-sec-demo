@@ -1,6 +1,9 @@
 """Claude Haiku tool loop (research R5, contracts/agent-invocation.md).
 
 Streams text deltas as they arrive and a progress line before each tool. At most MAX_ROUNDS tool rounds per turn.
+Prompt caching (Constitution IV, research R27): the system prompt is a static block (rules + playbook, the same for
+every turn of a session) and a per-turn block; cache breakpoints sit on the last tool, the static block and the
+conversation's last block each round, so each round re-reads the previous one's prefix from the cache.
 Role gate (FR-016, FR-016a, FR-019): SailPoint write tools are offered to the model only when the message that
 started the turn came from the IAM engineer; an application owner's turn gets the check tools only under the IAM
 engineer's standing check order. There are no application-side (AWS) tools at all (FR-010). The streamed reply
@@ -58,13 +61,28 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
                                                  "kind": {"type": "string", "enum": ["answer", "order", "question"]}},
                 "required": ["text", "kind"]}}},
             "required": ["thread", "items"]}, "progress": None},
-    "record_application_step": {"description": "Record an application-side step you are giving the application owner.",
-                                "input_schema": {"type": "object", "properties": {
-                                    "index": {"type": "integer"}, "title": {"type": "string"},
-                                    "read_only": {"type": "boolean"}}, "required": ["index", "title", "read_only"]},
-                                "progress": None},
-    "mark_application_in_progress": {"description": "Mark that the application owner has started the setup steps.",
-                                     "input_schema": {"type": "object", "properties": {}}, "progress": None},
+    "update_plan": {
+        "description": "Keep the shared plan current (both screens show it): mark steps as you work, add a step "
+                       "(e.g. a fix you found, assigned to who must do it) or skip one. Every add or skip, and every "
+                       "step set failed or blocked, needs a one-line reason. Steps are never removed.",
+        "input_schema": {"type": "object", "properties": {"ops": {"type": "array", "minItems": 1, "items": {
+            "type": "object", "properties": {
+                "op": {"type": "string", "enum": ["set_state", "add", "skip"]},
+                "step_id": {"type": "string", "description": "for set_state and skip: the step's id from the plan"},
+                "state": {"type": "string", "enum": ["todo", "in_progress", "done", "failed", "blocked"]},
+                "after": {"type": "string", "description": "for add: the id of the step it goes after"},
+                "title": {"type": "string", "maxLength": 120, "description": "for add"},
+                "actor": {"type": "string", "enum": ["application_owner", "iam_engineer", "agent"]},
+                "kind": {"type": "string", "enum": ["read_only", "change"]},
+                "milestone": {"type": "string", "enum": ["application_ready", "source_created", "configured",
+                                                         "connection_check", "aggregation", "test_connection"]},
+                "reason": {"type": "string", "maxLength": 160}},
+            "required": ["op"]}}}, "required": ["ops"]}, "progress": None},
+    "note_diagnosis": {
+        "description": "After a SailPoint action failed and you found the cause: one paragraph saying which side and "
+                       "why, stored with that action's details for the IAM engineer.",
+        "input_schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 1000}},
+                         "required": ["text"]}, "progress": None},
     "get_tenant_external_id": {"description": "Read the tenant's External ID (needed in the AWS role trust).",
                                "input_schema": {"type": "object", "properties": {}},
                                "progress": "reading the tenant External ID in SailPoint…"},
@@ -98,6 +116,9 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
                               "progress": "deleting the session's source in SailPoint…"},
 }
 
+CACHE = {"type": "ephemeral"}
+USAGE_FIELDS = (("input_tokens", "input_tokens"), ("cache_creation_input_tokens", "cache_write_tokens"),
+                ("cache_read_input_tokens", "cache_read_tokens"), ("output_tokens", "output_tokens"))
 ROLE_LABEL = {"iam_engineer": "IAM engineer", "application_owner": "application owner"}
 CHECK_TOOLS = {"peek_accounts", "start_aggregation", "test_connection"}
 CHECK_ORDER = {"peek_accounts": 0, "start_aggregation": 1, "test_connection": 2}
@@ -121,7 +142,38 @@ def _fill(template: str, values: dict[str, str]) -> str:
     return out
 
 
+def _template(lang: str, name: str) -> str:
+    path = PROMPTS / lang / name
+    return (path if path.exists() else PROMPTS / "en" / name).read_text()
+
+
+def static_system(payload: dict, pb: Playbook) -> str:
+    """Rules and playbook: identical for every turn of a session (no writer, thread or state in it), so it caches."""
+    session = payload["session"]
+    entry = pb.entry
+    return _fill(_template(payload.get("lang", "en"), "system.md"), {
+        "tenant_name": str((session.get("tenant") or {}).get("name", "")),
+        "owner_label": entry.get("owner_label", "application owner"),
+        "application_label": entry.get("application_label", "the application"),
+        "connector_name": entry["name"],
+        "setup": pb.render(pb.setup),
+        "collisions": pb.render(pb.collisions),
+        "failures": pb.render(pb.failures),
+    })
+
+
 def system_prompt(payload: dict, pb: Playbook) -> str:
+    """The whole system prompt as one text (static rules, then this turn)."""
+    return static_system(payload, pb) + "\n" + turn_system(payload, pb)
+
+
+def system_blocks(payload: dict, pb: Playbook) -> list[dict]:
+    return [{"type": "text", "text": static_system(payload, pb), "cache_control": CACHE},
+            {"type": "text", "text": turn_system(payload, pb)}]
+
+
+def turn_system(payload: dict, pb: Playbook) -> str:
+    """Who wrote, where the reply goes, the role gate, waiting state, suggestion defaults and session values."""
     session = payload["session"]
     ordered = payload["ordered_by"]
     entry = pb.entry
@@ -161,16 +213,10 @@ def system_prompt(payload: dict, pb: Playbook) -> str:
     values = {k: v for k, v in pb.values.items() if not k.startswith("policy_")}
     session_values = json.dumps({"steps": session.get("steps"), "source": session.get("source"), **values},
                                 default=str, indent=1)
-    lang = payload.get("lang", "en")
-    template = (PROMPTS / lang / "system.md").read_text() if (PROMPTS / lang).exists() else \
-        (PROMPTS / "en" / "system.md").read_text()
-    return _fill(template, {
+    return _fill(_template(payload.get("lang", "en"), "turn.md"), {
         "iam_engineer_name": ordered["display_name"] if role == "iam_engineer" else "the IAM engineer",
         "owner_name": ordered["display_name"] if role == "application_owner" else "the application owner",
-        "tenant_name": str((session.get("tenant") or {}).get("name", "")),
         "owner_label": entry.get("owner_label", "application owner"),
-        "application_label": entry.get("application_label", "the application"),
-        "connector_name": entry["name"],
         "speaker_label": f"{ROLE_LABEL[role]} ({ordered['display_name']})",
         "role_gate": gate,
         "thread_label": labels[thread],
@@ -178,11 +224,24 @@ def system_prompt(payload: dict, pb: Playbook) -> str:
         "other_thread": other,
         "waiting_line": waiting_line,
         "suggestion_defaults": suggestion_defaults or "(none)",
-        "setup": pb.render(pb.setup),
-        "collisions": pb.render(pb.collisions),
-        "failures": pb.render(pb.failures),
+        "plan": _plan_text(session.get("plan") or []),
         "session_values": session_values,
     })
+
+
+PLAN_MARK = {"done": "x", "in_progress": ">", "failed": "!", "blocked": "#", "skipped": "-", "todo": " "}
+
+
+def _plan_text(plan: list[dict]) -> str:
+    """The shared plan as the model sees it: `[x] id · title (actor) — reason`."""
+    if not plan:
+        return "(no plan yet)"
+    lines = []
+    for step in plan:
+        reason = f" — {step['reason']}" if step.get("reason") else ""
+        lines.append(f"[{PLAN_MARK.get(step.get('state'), ' ')}] {step['id']} · {step['title']} ({step['actor']}, "
+                     f"{step['state']}){reason}")
+    return "\n".join(lines)
 
 
 def _messages(payload: dict) -> list[dict]:
@@ -230,11 +289,14 @@ async def run_turn(payload: dict, pb: Playbook, isc_tools: IscTools, session_too
     names = offered_tools(role, payload.get("check_order"), bool(payload["session"].get("source")))
     tools = [{"name": n, "description": TOOL_SPECS[n]["description"], "input_schema": TOOL_SPECS[n]["input_schema"]}
              for n in names]
-    system = system_prompt(payload, pb)
+    tools[-1] = {**tools[-1], "cache_control": CACHE}
+    system = system_blocks(payload, pb)
     messages = _messages(payload)
     reply = ""
+    usage = {"calls": 0, **{name: 0 for _, name in USAGE_FIELDS}}
 
     for _round in range(MAX_ROUNDS):
+        _mark_last_block(messages)
         async with claude.messages.stream(model=model, max_tokens=MAX_TOKENS, system=system, messages=messages,
                                           tools=tools) as stream:
             async for event in stream:
@@ -242,6 +304,7 @@ async def run_turn(payload: dict, pb: Playbook, isc_tools: IscTools, session_too
                     reply += event.delta.text
                     await emit({"type": "delta", "text": event.delta.text})
             final = await stream.get_final_message()
+        _add_usage(usage, final)
         uses = [b for b in final.content if b.type == "tool_use"]
         # Several checks asked for in one round always run in the order SailPoint needs (Test Connection reports
         # "req.input is null" before the first aggregation, F5); everything else keeps the model's order.
@@ -273,6 +336,25 @@ async def run_turn(payload: dict, pb: Playbook, isc_tools: IscTools, session_too
         reply += "\n\n(I stopped after several steps. Ask me to continue for what's still pending.)"
 
     await emit({"type": "final", "text": reply.strip() or "Done."})
+    await emit({"type": "usage", **usage})
+
+
+def _mark_last_block(messages: list[dict]) -> None:
+    """Keep one rolling cache breakpoint on the conversation: on the newest block only (≤ 4 breakpoints in all)."""
+    for m in messages:
+        for block in m["content"] if isinstance(m["content"], list) else []:
+            if isinstance(block, dict):
+                block.pop("cache_control", None)
+    last = messages[-1]["content"]
+    if isinstance(last, list) and last and isinstance(last[-1], dict):
+        last[-1]["cache_control"] = CACHE
+
+
+def _add_usage(usage: dict, final: Any) -> None:
+    usage["calls"] += 1
+    u = getattr(final, "usage", None)
+    for attr, name in USAGE_FIELDS:
+        usage[name] += int(getattr(u, attr, 0) or 0)
 
 
 SECRET_CHECK_PROMPT = (

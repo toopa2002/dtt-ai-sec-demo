@@ -10,6 +10,7 @@ from ..chat import events
 from ..chat.access import participant_session
 from ..db import db
 from ..tenants import service as tenants
+from . import plan as plans
 from . import repo
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -44,6 +45,7 @@ async def full(s: dict) -> dict:
         return {"id": str(user_id), "display_name": u["display_name"], "username": u["username"],
                 "online": events.online(s["_id"], role)} if u else None
 
+    done, total, next_step = plans.progress(s.get("plan") or [])
     return summary(s) | {
         "tenant": {"id": str(tenant["_id"]), "name": tenant["name"], "api_host": tenant["api_host"],
                    "external_id": tenant.get("external_id")} if tenant else None,
@@ -54,6 +56,11 @@ async def full(s: dict) -> dict:
         "check_order": {"display_name": s["check_order"]["display_name"], "at": s["check_order"]["at"]}
         if s.get("check_order") else None,
         "event_seq": s.get("event_seq", 0),
+        "plan": plans.public(s.get("plan") or []),
+        "plan_done": done,
+        "plan_total": total,
+        "next_step_id": next_step,
+        "reopened_at": s.get("reopened_at"),
         "participants": {
             "iam_engineer": person(s["iam_engineer_id"], "iam_engineer"),
             "application_owner": person(s.get("application_owner_id"), "application_owner"),
@@ -112,7 +119,8 @@ async def create_session(body: SessionIn,
     application = details.get("source_name") or connector["name"]
     title = f"{application} → {tenant['name']}"
     session = await repo.create(title=title, connector_type=body.connector_type, tenant_id=tenant["_id"],
-                                details=details, iam_engineer_id=user.id, application_owner_id=owner_id)
+                                details=details, iam_engineer_id=user.id, application_owner_id=owner_id,
+                                plan=plans.seed(catalog.plan_template(body.connector_type), details))
     return await full(session)
 
 

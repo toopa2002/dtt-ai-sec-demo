@@ -1,0 +1,17 @@
+# T150: "What is left to do?" mid-session in the trust scenario (FR-008b). The answer must name the plan's open steps
+# in plan order (checked by the first match of each pattern) and must not list a done step as left.
+message: What is left to do?
+speaker: iam_engineer
+plan:
+  - {id: check_org, title: Check the organization and trusted access, actor: application_owner, state: done}
+  - {id: create_role, title: "Create the role with SailPoint's trust", actor: application_owner, state: done}
+  - {id: order, title: "Order: create the connector and run the checks", actor: iam_engineer, state: done}
+  - {id: create_source, title: Create the source, actor: agent, state: done}
+  - {id: configure_source, title: Configure the source, actor: agent, state: done}
+  - {id: connection_check, title: Connection check, actor: agent, state: failed, reason: AssumeRole denied}
+  - {id: x1, title: "Fix the role's trust: add the demo principal", actor: application_owner, state: in_progress, reason: The trust names the production principal.}
+  - {id: aggregation, title: Aggregate accounts and entitlements, actor: agent, state: blocked, reason: Waits on the trust fix.}
+  - {id: test_connection, title: Test Connection, actor: agent, state: blocked, reason: Waits on the trust fix.}
+  - {id: cloudtrail_confirm, title: Confirm from CloudTrail that SailPoint used the role, actor: application_owner, state: todo}
+left_in_order: ['trust', 'aggregat', 'Test Connection', 'CloudTrail']
+not_left: ['Configure the source']

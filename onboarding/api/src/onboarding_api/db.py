@@ -55,6 +55,29 @@ async def migrate_threads() -> int:
     return count
 
 
+async def migrate_plans() -> int:
+    """Give sessions created before the shared plan (research R22) their plan, once: the connector's starting plan
+    with each milestone's plan step set from the stored milestone state, and the application owner's setup steps done
+    when the application was already ready. Sessions that have a plan are left alone. Returns the number migrated."""
+    from .catalog import catalog
+    from .sessions import plan as plans
+
+    migrated = 0
+    async for s in db().sessions.find({"plan": {"$exists": False}}):
+        plan = plans.seed(catalog.plan_template(s["connector_type"]), s.get("details") or {})
+        mapping = catalog.plan_steps_by_milestone(s["connector_type"])
+        for milestone in plans.MILESTONES:
+            state = ((s.get("steps") or {}).get(milestone) or {}).get("state", "not_started")
+            if state != "not_started":
+                try:
+                    plan = plans.mark_milestone(plan, milestone, state, mapping.get(milestone), "Before the plan existed.")
+                except plans.PlanError:
+                    continue
+        await db().sessions.update_one({"_id": s["_id"]}, {"$set": {"plan": plan}})
+        migrated += 1
+    return migrated
+
+
 async def ensure_indexes() -> None:
     d = db()
     await d.users.create_index("username", unique=True)
@@ -73,8 +96,11 @@ async def ensure_indexes() -> None:
     await d.attachments.create_index("expires_at", expireAfterSeconds=0)
     # actions and audit are kept under the organisation's audit retention: no TTL (research R10).
     await d.actions.create_index([("session_id", ASCENDING), ("at", ASCENDING)])
+    await d.actions.create_index([("turn_id", ASCENDING), ("action_ref", ASCENDING)], unique=True,
+                                 partialFilterExpression={"action_ref": {"$type": "string"}})
     await d.audit.create_index("at")
     await migrate_threads()
+    await migrate_plans()
 
 
 async def close() -> None:

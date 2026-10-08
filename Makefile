@@ -54,12 +54,12 @@ onboarding-up:            ## Onboarding: MongoDB, API, web, network policies; /o
 	$(O)/up.sh
 onboarding-bootstrap:     ## Onboarding: create the first admin account
 	$(O)/bootstrap.sh
-onboarding-dev:           ## Onboarding: run the whole stack locally against the ISC stub (no cluster)
+onboarding-dev:           ## Onboarding: local stack against the ISC stub (real Claude Haiku: paid per message; AGENT_MODEL=fake for free)
 	$(O)/dev.sh start
 
-onboarding-evals:         ## Onboarding: agent diagnosis evals (SC-005)
-	$(O)/evals.sh
-onboarding-e2e:           ## Onboarding: two-browser end-to-end run against the ISC stub
+onboarding-evals:         ## Onboarding: SC-005 diagnosis gate (paid: Bedrock, prints estimate; skipped when unchanged)
+	$(O)/evals.sh --gate
+onboarding-e2e:           ## Onboarding: two-browser e2e on the ISC stub + scripted model (free; REAL_MODEL=1 for Bedrock)
 	$(O)/e2e.sh
 onboarding-leak-scan:     ## Onboarding: scan MongoDB and logs for leaked secrets (SC-004)
 	$(O)/leak-scan.sh

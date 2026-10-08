@@ -1,0 +1,23 @@
+# Starting plan for an AWS SaaS session (FR-008b, research R22; contracts/connector-playbook.md). Seeded into every
+# new session; the agent then marks, adds and skips steps with `update_plan`. Order follows the skill:
+# scripts/aws-setup.sh (steps 1-8 of setup.md), then scripts/isc-source.sh create / configure / peek / aggregate /
+# test, then the CloudTrail confirmation (setup.md step 9).
+#   actor: application_owner | iam_engineer | agent     kind: read_only | change
+#   milestone: the FR-008 milestone the step counts towards (none for the order and the final confirmation)
+#   setup_step: the step number in setup.md         skip_unless: session details; skipped when all are empty
+steps:
+  - {id: check_org, title: Check the organization and trusted access, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 1}
+  - {id: check_role_name, title: Check the role name is free, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 2}
+  - {id: create_role, title: "Create the role with SailPoint's trust", actor: application_owner, kind: change, milestone: application_ready, setup_step: 3}
+  - {id: aggregation_policy, title: Attach the read-only aggregation policy, actor: application_owner, kind: change, milestone: application_ready, setup_step: 4}
+  - {id: organization_policy, title: Attach the organization read policy, actor: application_owner, kind: change, milestone: application_ready, setup_step: 5}
+  - {id: discovery_policies, title: Add the AI-agent discovery policies, actor: application_owner, kind: change, milestone: application_ready, setup_step: 6, skip_unless: [bedrock_regions, agentcore_regions]}
+  - {id: member_accounts, title: Create the role in the member accounts, actor: application_owner, kind: change, milestone: application_ready, setup_step: 7}
+  - {id: confirm_role, title: Confirm the role, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 8}
+  - {id: order, title: "Order: create the connector and run the checks", actor: iam_engineer, kind: change}
+  - {id: create_source, title: Create the source, actor: agent, kind: change, milestone: source_created}
+  - {id: configure_source, title: Configure the source, actor: agent, kind: change, milestone: configured}
+  - {id: connection_check, title: Connection check, actor: agent, kind: read_only, milestone: connection_check}
+  - {id: aggregation, title: Aggregate accounts and entitlements, actor: agent, kind: read_only, milestone: aggregation}
+  - {id: test_connection, title: Test Connection, actor: agent, kind: read_only, milestone: test_connection}
+  - {id: cloudtrail_confirm, title: Confirm from CloudTrail that SailPoint used the role, actor: application_owner, kind: read_only, setup_step: 9}

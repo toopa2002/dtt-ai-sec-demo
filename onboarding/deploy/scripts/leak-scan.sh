@@ -8,7 +8,7 @@ source "$(dirname "$0")/lib.sh"
 TARGET="${1:-dev}"
 # AWS access key ids, JWTs / bearer tokens, 64-hex strings (tenant client secrets, AWS secret-like material).
 PATTERNS=('(AKIA|ASIA)[0-9A-Z]{16}' 'eyJ[A-Za-z0-9_-]{10,}' '\b[0-9a-fA-F]{64}\b')
-COLLECTIONS='["messages","events","actions","audit"]'
+COLLECTIONS='["messages","events","actions","audit","sessions"]'  # sessions: plan step titles and reasons (R22)
 hits=0
 
 MONGO_JS='

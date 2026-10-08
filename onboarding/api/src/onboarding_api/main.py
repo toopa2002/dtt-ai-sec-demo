@@ -18,6 +18,7 @@ from .chat import attachments, stream
 from .chat import routes as chat_routes
 from .config import settings
 from .logging import setup_logging
+from .sessions import admin_routes as session_admin_routes
 from .sessions import routes as session_routes
 from .tenants import routes as tenant_routes
 
@@ -35,7 +36,7 @@ app = FastAPI(title="ISC Onboarding — session API", lifespan=lifespan, docs_ur
 
 api = APIRouter(prefix=settings().base_path)
 for module in (auth_routes, admin_routes, catalog_routes, tenant_routes, session_routes, chat_routes, attachments,
-               stream, audit_routes):
+               stream, audit_routes, session_admin_routes):
     api.include_router(module.router)
 
 

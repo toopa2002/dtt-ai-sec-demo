@@ -46,16 +46,29 @@ export const relayNotes = (l: Locator) => l.locator('.note');
 /** The waiting banner inside one thread (FR-006g). */
 export const banner = (thread: Locator) => thread.locator('app-waiting-banner [role=status]');
 
+/** On the application owner's screen the IAM engineer's thread is collapsed by default (FR-006): open it. */
+export async function openOther(page: Page): Promise<void> {
+  const bar = page.getByRole('button', { name: /IAM engineer ↔ Agent/ });
+  await expect(bar).toBeVisible();
+  if ((await bar.getAttribute('aria-expanded')) !== 'true') await bar.click();
+}
+
 export async function send(page: Page, text: string): Promise<void> {
   await page.locator('#composer-text').fill(text);
   await page.getByRole('button', { name: 'Send' }).click();
 }
 
-/** Waits until no message in either thread is queued or being answered, then returns the last agent message in
- * the viewer's own thread. */
+/** Waits until no reply in either thread is still received or working (FR-006h), then returns the last agent message
+ * in the viewer's own thread. */
 export async function agentDone(page: Page, timeout = 4 * 60_000) {
   await expect(page.locator('app-thread article.msg').last()).toBeVisible();
-  await expect(page.locator('app-thread .state', { hasText: /queued|agent is answering/ })).toHaveCount(0, { timeout });
+  // The reply to the viewer's latest message must exist first (it is created with the message, FR-006h).
+  const mine = ownLog(page).locator('article.msg.mine');
+  if (await mine.count()) {
+    await expect(mine.last().locator('xpath=following-sibling::article[contains(@class,"agent")][1]')).toBeVisible({ timeout });
+  }
+  await expect(page.locator('app-thread article.msg[data-reply-state="received"], app-thread article.msg[data-reply-state="working"]'))
+    .toHaveCount(0, { timeout });
   return ownLog(page).locator('article.msg.agent').last();
 }
 

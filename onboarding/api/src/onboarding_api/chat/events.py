@@ -51,8 +51,15 @@ async def replay(session_id: ObjectId, after: int) -> list[dict]:
                                                sort=[("event_id", 1)])]
 
 
-def visible(event: dict, user_id: ObjectId) -> bool:
-    return event["visible_to"] == "both" or event["visible_to"] == str(user_id)
+def visible(event: dict, user_id: ObjectId, role: str | None = None) -> bool:
+    """`both`, a role (`role:iam_engineer`: whoever holds that place now, so it survives a handover, research R24),
+    or one user id (a held screenshot's uploader, an `access.revoked` notice)."""
+    to = event["visible_to"]
+    return to == "both" or to == str(user_id) or (role is not None and to == f"role:{role}")
+
+
+def for_role(role: str) -> str:
+    return f"role:{role}"
 
 
 # Presence: count of open streams per role in this API process (single replica, research R7).

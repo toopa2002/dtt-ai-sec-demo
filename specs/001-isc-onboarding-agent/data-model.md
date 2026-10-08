@@ -66,15 +66,38 @@ fixed per release). Each entry: `id`, `name`, `status` (`available` | `planned`)
 | `waiting_reason` | string? | the awaited person's next step for the waiting banner; one line, ≤ 120 chars, masked; null with `waiting_on` (FR-006g, research R20) |
 | `check_order` | object? | `{user_id, display_name, turn_id, at}` — the IAM engineer's standing order to run the checks; lets an application owner's confirmation rerun them (FR-016a, research R16); cleared when all checks pass or the IAM engineer orders something new |
 | `suggestions` | object | `{iam_engineer: Suggestion[], application_owner: Suggestion[]}`, each list 3–5 items, plus `for_event_id` (FR-006e, research R17) |
-| `status` | `"open"` \| `"finished"` | |
-| `finished_at`, `expires_at` | Date? | `expires_at = finished_at + 90 days`; TTL (research R10) |
+| `plan` | PlanStep[] | ordered, ≤ 40; seeded from `playbooks/<id>/plan.yaml` at creation; changed only by the agent's `update_plan` and by milestone `set_step` events (FR-008a-c, research R22) |
+| `status` | `"open"` \| `"finished"` | open → finished by the IAM engineer (FR-031); finished → open only by an admin reopen (FR-032) |
+| `finished_at`, `expires_at` | Date? | `expires_at = finished_at + 90 days`; TTL (research R10); both cleared on reopen |
+| `reopened_at` | Date? | last admin reopen (FR-032) |
+| `handovers` | object[] | `{place, from_user_id, to_user_id, admin_id, at}`, appended per handover (FR-033) |
+| `pending_handover` | object? | `{place, to_user_id, admin_id, requested_at}` while a turn holds `turn_lock`; applied when the turn ends (research R23) |
 | `created_at` | Date | |
 
 Indexes: `{iam_engineer_id: 1, status: 1}`, `{application_owner_id: 1, status: 1}`, TTL on `expires_at`.
 
 **State transitions (`steps.*.state`)**: `not_started → in_progress → passed | failed`; `failed → in_progress` on a
-rerun; `passed → in_progress` only when the agent reruns that check after a fix. Only the agent's `set_step` tool and
-the API's handling of ISC task results change step states, never the browser.
+rerun; `passed → in_progress` only when the agent reruns that check after a fix. Since the plan (R22) the API **derives** `steps.*` from the plan
+steps tied to each milestone (any failed → `failed`; all done or skipped → `passed`; any done or in progress →
+`in_progress`; else `not_started`), so the header always follows the plan (FR-008c). The browser never changes either.
+
+**PlanStep** (embedded in `sessions.plan`):
+
+| Field | Type | Rules |
+|---|---|---|
+| `id` | string | playbook id (`check_org`, `create_source`…) or `x1`, `x2`… for steps the agent adds |
+| `title` | string | ≤ 120 chars, masked |
+| `actor` | `"application_owner"` \| `"iam_engineer"` \| `"agent"` | who does it |
+| `kind` | `"read_only"` \| `"change"` | |
+| `state` | `"todo"` \| `"in_progress"` \| `"done"` \| `"failed"` \| `"skipped"` \| `"blocked"` | |
+| `reason` | string? | ≤ 160 chars, masked; required for added, skipped, blocked and failed steps and for leaving `done` |
+| `milestone` | step key? | which FR-008 milestone it counts towards |
+| `added_by` | `"playbook"` \| `"agent"` | |
+| `instruction`, `expected` | string? | application-owner steps: keys into the playbook's `setup.md` |
+| `changed_at` | Date | |
+
+Rules: steps are never removed; order changes only by `add` (inserted after a named step). Count shown = steps `done`
+of steps not `skipped`; next step = first step not `done`/`skipped`.
 
 ## messages
 
@@ -83,7 +106,11 @@ the API's handling of ISC task results change step states, never the browser.
 | `session_id` | ObjectId → sessions | |
 | `seq` | int | strictly increasing per session; the queue order (FR-006a) |
 | `thread` | `"iam_engineer"` \| `"application_owner"` | whose thread it belongs to (FR-006); a participant's message is always in their own thread, set by the API from the caller's role |
-| `kind` | `"message"` \| `"relay_note"` | a relay note is the agent's one-line note about what it asked or passed on in the other thread (FR-006c) |
+| `kind` | `"message"` \| `"relay_note"` \| `"system_note"` | a relay note is the agent's one-line note about what it asked or passed on in the other thread (FR-006c); a system note is the API's line about a reopen or handover (FR-033) |
+| `reply_to` | ObjectId? → messages | on an agent reply: the participant message it answers; created with that message (FR-006h, research R21) |
+| `reply_state` | `"received"` \| `"working"` \| `"answered"` \| `"failed"`? | agent replies only; `received → working → answered \| failed` |
+| `ahead` | int? | while `received`: messages before it in the session queue |
+| `status_text` | string? | the system-written status shown until the answer streams in; cleared when `answered` |
 | `relay_ref` | ObjectId? → messages | on a relay note: the message it refers to in the other thread, when there is one |
 | `relayed_from` | `"iam_engineer"` \| `"application_owner"`? | on an agent message that passes on what the other participant said (edge case "tell the other person") |
 | `speaker` | `"iam_engineer"` \| `"application_owner"` \| `"agent"` | a participant only ever speaks in their own thread |
@@ -92,7 +119,7 @@ the API's handling of ISC task results change step states, never the browser.
 | `text` | string | **after masking** (FR-026); max 8,000 chars |
 | `masked` | bool | true when the masker replaced anything |
 | `attachment_ids` | ObjectId[] → attachments | |
-| `queue_state` | `"queued"` \| `"processing"` \| `"answered"` | participant messages only |
+| `queue_state` | `"queued"` \| `"processing"` \| `"answered"` | participant messages only; internal queue state, no longer shown (the reply's `reply_state` is) |
 | `turn_id` | string? | links an agent reply to the turn that produced it |
 | `created_at`, `expires_at` | Date | TTL via the session's `expires_at` (copied at finish) |
 
@@ -130,7 +157,7 @@ uploader replaces or dismisses the image.
 | `event_id` | int | per-session increasing; the SSE `id:` (research R7) |
 | `type` | see [contracts/live-events.md](contracts/live-events.md) | |
 | `payload` | object | already masked |
-| `visible_to` | `"both"` \| user id | `held` attachment events go to the uploader only |
+| `visible_to` | `"both"` \| `"role:iam_engineer"` \| `"role:application_owner"` \| user id | role form resolved against the current participant at delivery (survives handover, research R24): `action.*` and `suggestions.updated`; a user id only for `attachment.held` (uploader) and `access.revoked` (previous participant) |
 | `created_at`, `expires_at` | Date | TTL |
 
 Index: `{session_id: 1, event_id: 1}` unique.
@@ -146,26 +173,39 @@ Index: `{session_id: 1, event_id: 1}` unique.
 | `ordered_by` | ObjectId → users | **required**; the IAM engineer whose message started the turn, or the standing `check_order` for a check rerun after the application owner's confirmation (FR-016a) |
 | `trigger` | `"order"` \| `"application_owner_confirmation"` | why the action ran; the second only for check reruns |
 | `turn_id` | string | |
-| `request_summary` | object | masked field names/values the agent sent (no credentials) |
-| `result` | `"ok"` \| `"failed"` | |
-| `error` | string? | masked ISC error text |
+| `action_ref` | string | agent-made, unique within the turn; `(turn_id, action_ref)` is unique, so a `running` record is updated in place (research R24) |
+| `order_message_id` | ObjectId? → messages | the participant message that started the turn ("Show in thread") |
+| `request` | object | masked fields and values the agent sent (no credentials); records before R24 have `request_summary` instead |
+| `result` | `"ok"` \| `"failed"` \| `"running"` | |
+| `response` | object | `{task_ids[], task_states{id: state}, counts{accounts?, entitlements?}, error?}`, masked |
+| `error` | string? | masked ISC error text (kept for old records; new ones also carry it in `response`) |
 | `task_ids` | string[] | ISC task / aggregation ids |
-| `at` | Date | |
+| `diagnosis` | string? | the agent's diagnosis of a failure (`note_diagnosis`), ≤ 1,000 chars, masked |
+| `outcome` | string | one line computed by the API: "passed · 3 accounts read", "failed · " + first error line, "running" (FR-020a) |
+| `started_at`, `at` | Date | `at` = when it ended (or last update while running) |
+| `duration_ms` | int? | |
 
-Index: `{session_id: 1, at: 1}`.
+Indexes: `{session_id: 1, at: 1}`, `{turn_id: 1, action_ref: 1}` unique (sparse).
+
+Visible to the session's IAM engineer only (FR-020, research R24).
 
 ## audit (sign-ins and admin actions; no TTL)
 
 `{at, actor_id?, username_tried?, kind: "sign_in" | "sign_in_failed" | "locked" | "user_created" | "user_disabled" |
-"password_reset" | "role_changed" | "tenant_added" | "credential_replaced", target?, detail?}`.
+"password_reset" | "role_changed" | "tenant_added" | "credential_replaced" | "session_reopened" | "session_handover",
+target?, detail?}`. A handover's `detail` is `{session_id, place, from_user_id, to_user_id}` (FR-033).
 
 ## Validation rules carried from the spec
 
 - Only `role = iam_engineer` may create sessions or be the ordering user of an `actions` record (FR-016, FR-019).
-- A session has exactly one IAM engineer and at most one application owner.
+- A session has exactly one IAM engineer and at most one application owner at a time; only an admin handover changes
+  either (FR-033), to an active user with that role who does not hold the other place.
+- A finished session accepts no messages (409 `session_finished`) until an admin reopens it (FR-031, FR-032).
+- Every participant message gets exactly one agent reply (`reply_to`) in the same write (FR-006h).
 - `connector_type` must reference an `available` catalog entry at session creation.
 - `source` is set only by the agent's `create_source` result. `delete_session_source` may target only `source.id`.
-- All text fields reaching `messages`, `events`, `actions.error` and logs pass through the masker first.
+- All text fields reaching `messages`, `events`, `actions` (request, response, error, diagnosis), plan step titles and
+  reasons, and logs pass through the masker first.
 
 ### Thread rules (FR-006–FR-006c, FR-016a, SC-010)
 

@@ -21,6 +21,20 @@ def count(name: str) -> None:
     _counters[name] += 1
 
 
+USAGE_METRICS = {"calls": "model_calls", "input_tokens": "model_input_tokens",
+                 "cache_write_tokens": "model_cache_write_tokens", "cache_read_tokens": "model_cache_read_tokens",
+                 "output_tokens": "model_output_tokens"}
+
+
+def record_usage(usage: dict, **extra: str) -> None:
+    """Model calls and tokens of one turn (Constitution IV, research R27): running totals on /healthz/metrics and one
+    log line per turn."""
+    values = {metric: int(usage.get(key) or 0) for key, metric in USAGE_METRICS.items()}
+    for metric, value in values.items():
+        _counters[metric] += value
+    log.info("model_usage", extra={**values, **extra})
+
+
 def p95(name: str) -> float | None:
     values = sorted(_window.get(name, ()))
     if not values:

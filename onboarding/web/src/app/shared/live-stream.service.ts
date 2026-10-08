@@ -1,6 +1,6 @@
 import { computed, inject, Injectable, NgZone, OnDestroy, signal } from '@angular/core';
 import { API, ApiService } from './api.service';
-import { Action, Message, QueueState, Role, Session, StepKey, StepState, Suggestion } from './models';
+import { Action, Message, PlanStep, QueueState, Role, Session, StepKey, StepState, Suggestion } from './models';
 
 /**
  * One onboarding session, live (contracts/live-events.md): history first, then the SSE stream with Last-Event-ID
@@ -26,6 +26,10 @@ export class LiveSession implements OnDestroy {
   readonly heldNotices = signal<{ attachment_id: string; reason: string }[]>([]);
   readonly checkedAttachments = signal<Record<string, 'passed' | 'held'>>({});
   readonly error = signal<string | null>(null);
+  /** Set when an admin handed this viewer's place to someone else (FR-033): the screen leaves the session. */
+  readonly revoked = signal(false);
+  /** The viewer's role; the application owner never loads the SailPoint action record (FR-020, research R24). */
+  private role: Role = 'iam_engineer';
 
   readonly iamThread = computed(() => this.messages().filter((m) => m.thread === 'iam_engineer'));
   readonly ownerThread = computed(() => this.messages().filter((m) => m.thread === 'application_owner'));
@@ -37,6 +41,12 @@ export class LiveSession implements OnDestroy {
   private retry = 0;
   private resyncing = false;
   private downTimer: ReturnType<typeof setTimeout> | undefined;
+  private watchdog: ReturnType<typeof setInterval> | undefined;
+  /** When the stream last delivered an event (the API sends `ping` every 15 s). */
+  private streamAt = 0;
+  private polling = false;
+  /** Event handlers by type, shared by the stream and the long-poll fallback. */
+  private readonly handlers: Record<string, (data: any) => void> = {};
   private closed = false;
   private id = '';
 
@@ -44,13 +54,14 @@ export class LiveSession implements OnDestroy {
     return thread === 'iam_engineer' ? this.iamThread() : this.ownerThread();
   }
 
-  async open(id: string): Promise<void> {
+  async open(id: string, role: Role = 'iam_engineer'): Promise<void> {
     this.id = id;
+    this.role = role;
     this.closed = false;
     const [session, messages, actions, suggestions] = await Promise.all([
       this.api.getSession(id),
       this.api.messages(id),
-      this.api.actions(id),
+      this.loadActions(id),
       this.api.suggestions(id).catch(() => null),
     ]);
     this.session.set(session);
@@ -64,11 +75,54 @@ export class LiveSession implements OnDestroy {
       application_owner: !!session.participants.application_owner?.online,
     });
     this.connect();
+    // A proxy can hold the stream back while the request itself succeeds (seen behind a TLS-inspecting corporate
+    // proxy, which buffers event streams): when the stream has delivered nothing for STALE_MS, or nothing at all,
+    // the screen long-polls the same events as plain JSON responses until the stream delivers again.
+    clearInterval(this.watchdog);
+    this.watchdog = setInterval(() => {
+      if (!this.streamFresh()) void this.longPoll();
+    }, CHECK_MS);
+  }
+
+  private streamFresh(): boolean {
+    return this.streamAt > 0 && Date.now() - this.streamAt < STALE_MS;
+  }
+
+  private async longPoll(): Promise<void> {
+    if (this.polling || this.closed) return;
+    this.polling = true;
+    try {
+      // The catch-up reload shows the API is reachable: the screen is live again, through polling.
+      if (await this.resync()) this.connected.set(true);
+      while (!this.closed && !this.streamFresh()) {
+        try {
+          const { events } = await this.api.pollEvents(this.id, this.lastEventId);
+          this.zone.run(() => {
+            this.connected.set(true);
+            for (const e of events) this.apply(e.id, e.type, e.data);
+          });
+        } catch (err: any) {
+          this.connected.set(false);
+          // 429: the tunnel's request limit; back off longer. A 401 is handled by the sign-in redirect.
+          await new Promise((r) => setTimeout(r, err?.status === 429 ? 30000 : CHECK_MS));
+        }
+      }
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** Apply one event once, in order: events at or below the last applied id are skipped. */
+  private apply(id: number, type: string, data: unknown): void {
+    if (id && id <= this.lastEventId) return;
+    if (id) this.lastEventId = id;
+    this.handlers[type]?.(data);
   }
 
   ngOnDestroy(): void {
     this.closed = true;
     clearTimeout(this.downTimer);
+    clearInterval(this.watchdog);
     this.source?.close();
   }
 
@@ -89,15 +143,19 @@ export class LiveSession implements OnDestroy {
       // Show "reconnecting…" only if the stream stays down: the browser's own reconnects take a few seconds.
       clearTimeout(this.downTimer);
       this.downTimer = setTimeout(() => {
-        if (es.readyState !== EventSource.OPEN || this.source !== es) this.connected.set(false);
+        if ((es.readyState !== EventSource.OPEN || this.source !== es) && !this.polling) this.connected.set(false);
       }, 5000);
       if (es.readyState === EventSource.CLOSED && !this.closed) {
         const wait = Math.min(30000, 1000 * 2 ** this.retry++);
         setTimeout(() => this.connect(), wait);
       }
     });
-    const on = (type: string, handler: (data: any) => void) =>
+    const on = (type: string, handler: (data: any) => void) => {
+      this.handlers[type] = handler;
       es.addEventListener(type, (ev) => this.zone.run(() => {
+        if (this.source !== es) return;
+        this.streamAt = Date.now();
+        this.connected.set(true);
         const id = Number((ev as MessageEvent).lastEventId || 0);
         if (id && id <= this.lastEventId) return; // already applied
         let data: unknown;
@@ -108,11 +166,18 @@ export class LiveSession implements OnDestroy {
           void this.resync();
           return;
         }
-        if (id) this.lastEventId = id;
-        handler(data);
+        this.apply(id, type, data);
       }));
+    };
 
+    on('ping', () => undefined);
     on('message.created', (m: Message) => this.upsert(m));
+    on('reply.status', (d: { message_id: string; reply_state: Message['reply_state']; ahead?: number | null; status_text?: string | null }) =>
+      this.messages.update((list) =>
+        list.map((m) => (m.id === d.message_id
+          ? { ...m, reply_state: d.reply_state, ahead: d.ahead ?? null, status_text: d.status_text ?? null } : m)),
+      ),
+    );
     on('message.queue', (d: { message_id: string; queue_state: QueueState }) =>
       this.messages.update((list) => list.map((m) => (m.id === d.message_id ? { ...m, queue_state: d.queue_state } : m))),
     );
@@ -154,9 +219,16 @@ export class LiveSession implements OnDestroy {
       this.session.update((s) => (s ? { ...s, steps: { ...s.steps, [d.step]: d.state } } : s)),
     );
     on('action.recorded', (a: Action) => this.actions.update((list) => [...list.filter((x) => x.id !== a.id), a]));
-    on('session.updated', (d: { source?: Session['source']; status?: Session['status'] }) =>
+    on('action.updated', (a: Action) => this.actions.update((list) => list.map((x) => (x.id === a.id ? a : x))));
+    on('plan.updated', (d: { plan: PlanStep[]; done: number; total: number; next_step_id: string | null }) =>
+      this.session.update((s) => (s ? { ...s, plan: d.plan, plan_done: d.done, plan_total: d.total, next_step_id: d.next_step_id } : s)),
+    );
+    on('participant.changed', () => void this.resync());
+    on('access.revoked', () => this.leave());
+    on('session.updated', (d: { source?: Session['source']; status?: Session['status']; reopened_at?: string }) =>
       this.session.update((s) =>
-        s ? { ...s, ...('source' in d ? { source: d.source ?? null } : {}), ...(d.status ? { status: d.status } : {}) } : s,
+        s ? { ...s, ...('source' in d ? { source: d.source ?? null } : {}), ...(d.status ? { status: d.status } : {}),
+              ...(d.reopened_at ? { reopened_at: d.reopened_at } : {}) } : s,
       ),
     );
     on('participant.presence', (d: { role: Role; online: boolean }) =>
@@ -186,14 +258,14 @@ export class LiveSession implements OnDestroy {
   }
 
   /** Reload messages, actions, steps and suggestions from the API; keeps any agent reply still streaming. */
-  private async resync(): Promise<void> {
-    if (this.resyncing || !this.id) return;
+  private async resync(): Promise<boolean> {
+    if (this.resyncing || !this.id) return false;
     this.resyncing = true;
     try {
       const [session, messages, actions, suggestions] = await Promise.all([
         this.api.getSession(this.id),
         this.api.messages(this.id),
-        this.api.actions(this.id),
+        this.loadActions(this.id),
         this.api.suggestions(this.id).catch(() => null),
       ]);
       const streaming = this.messages().filter((m) => m.streaming && !messages.some((x) => x.id === m.id));
@@ -211,11 +283,23 @@ export class LiveSession implements OnDestroy {
       this.actions.set(actions);
       if (suggestions) this.suggestions.set(suggestions.items);
       this.lastEventId = Math.max(this.lastEventId, session.event_seq ?? 0);
-    } catch {
-      // Next turn or reconnect tries again.
+      return true;
+    } catch (err: any) {
+      if (err?.status === 404) this.leave();  // no longer a participant (handed over)
+      // Otherwise the next turn or reconnect tries again.
+      return false;
     } finally {
       this.resyncing = false;
     }
+  }
+
+  private loadActions(id: string): Promise<Action[]> {
+    return this.role === 'iam_engineer' ? this.api.actions(id) : Promise.resolve([]);
+  }
+
+  private leave(): void {
+    this.revoked.set(true);
+    this.ngOnDestroy();
   }
 
   private upsert(m: Message): void {
@@ -229,6 +313,9 @@ export class LiveSession implements OnDestroy {
     this.heldNotices.update((h) => h.filter((x) => x.attachment_id !== attachmentId));
   }
 }
+
+const CHECK_MS = 5000;
+const STALE_MS = 35000;
 
 function waitingOf(on: Role | null | undefined, reason: string | null | undefined) {
   return on ? { on, reason: reason || null } : null;
