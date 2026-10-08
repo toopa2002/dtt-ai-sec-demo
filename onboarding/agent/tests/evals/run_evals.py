@@ -1,7 +1,11 @@
-"""Diagnosis evals for the AWS SaaS playbook (SC-005): does the agent's first reply name the cause and the side?
+"""Diagnosis evals per connector type (001 SC-005, 002 SC-103): does the agent's first reply name the cause and side?
 
   uv run --project onboarding/agent --group evals python onboarding/agent/tests/evals/run_evals.py [--runs 3]
+      [--suite aws_saas_failures|entra_failures|entra_setup_checks]
       [--gate] [--estimate] [--force] [--cases F1,F4] [--mode text|screenshot|both] [--concurrency 4]
+
+Suites (spec 002 T076): each has its own cases, its own connector type and its own gate fingerprint (its cases, its
+playbook folder, the prompts and the tool loop), so a change to one connector type never re-runs another's gate.
 
 Cost (Constitution IV, research R29): every run calls Claude Haiku on Bedrock, so it prints its estimate first and the
 actual calls, tokens and cost after. The default is 3 runs per case (a quick read while working). `--gate` is the
@@ -57,7 +61,47 @@ SIDE = {
 }
 
 
+ENTRA_SIDE = {
+    "application": re.compile(r"\bside\b\W{0,4}(Microsoft\s+)?(Entra|Azure|Power Platform)\b|"
+                              r"\b(Entra|Azure)\b[^.\n]{0,40}\bside\b", re.I),
+    "sailpoint": SIDE["sailpoint"],
+}
+SUITES: dict[str, dict[str, Any]] = {
+    "aws_saas_failures": {"type": "aws-saas", "plan": True},
+    "entra_failures": {"type": "entra-id", "plan": False},
+    "entra_setup_checks": {"type": "entra-id", "plan": False},
+}
+SUITE = "aws_saas_failures"
+
+
+def cases_dir(suite: str) -> Path:
+    return CASES if suite == "aws_saas_failures" else CASES.parent / suite
+
+
+def gate_file(suite: str) -> Path:
+    return GATE_FILE if suite == "aws_saas_failures" else GATE_FILE.with_name(f"evals-gate-{suite}.json")
+
+
+def entra_session() -> dict:
+    return {
+        "id": "eval", "connector_type": "entra-id",
+        "tenant": {"name": "acme-demo", "api_host": "acme-demo.api.identitynow-demo.com",
+                   "credential_provider": "onboarding-isc-acme-demo"},
+        "details": {"source_name": "Entra ID - Contoso", "source_owner": "w.rakkiatngam",
+                    "tenant_domain": "contoso-demo.onmicrosoft.com", "app_name": "SailPoint ISC - acme-demo",
+                    "capabilities": ["directory", "service_principals", "ai_agents"],
+                    "foundry_subscriptions": ["8b1e4c2a-0d3f-4a77-9c51-6f2e8a0b3d19"], "source_mode": "new",
+                    "client_id": "3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05"},
+        "steps": {"application_ready": "in_progress", "source_created": "passed", "configured": "passed",
+                  "connection_check": "failed"},
+        "source": {"id": "0" * 31 + "1", "name": "Entra ID - Contoso"},
+        "application_secret": {"provider": "onboarding-entra-eval", "state": "in_isc", "expires_on": "2027-10-08"},
+    }
+
+
 def session() -> dict:
+    if SUITES[SUITE]["type"] == "entra-id":
+        return entra_session()
     return {
         "id": "eval", "connector_type": "aws-saas",
         "tenant": {"name": "acme-demo", "api_host": "acme-demo.api.identitynow-demo.com",
@@ -90,12 +134,13 @@ class FailingIsc:
 
 
 def screenshot(case: dict) -> bytes:
-    path = CASES / f"{case['id']}.png"
+    path = cases_dir(SUITE) / f"{case['id']}.png"
     if path.exists():
         return path.read_bytes()
     from PIL import Image, ImageDraw, ImageFont
 
-    lines = ["SailPoint Identity Security Cloud" if case["speaker"] == "iam_engineer" else "AWS CloudShell", ""]
+    app = "Microsoft Entra admin center" if SUITES[SUITE]["type"] == "entra-id" else "AWS CloudShell"
+    lines = ["SailPoint Identity Security Cloud" if case["speaker"] == "iam_engineer" else app, ""]
     lines += textwrap.wrap(case["error"], 88)
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 18)
@@ -116,7 +161,9 @@ def screenshot(case: dict) -> bytes:
 def payload(case: dict, mode: str) -> dict:
     who = case["speaker"]
     name = {"iam_engineer": "Wanchai R.", "application_owner": "Ploy S."}[who]
-    if mode == "text":
+    if mode == "text" and SUITE == "entra_setup_checks":
+        msg = f"Here is the output:\n\n{case['error']}"  # the administrator pasting a step's output (FR-112)
+    elif mode == "text":
         msg = f"We got this error:\n\n{case['error']}"
         images = []
     else:
@@ -136,10 +183,13 @@ def payload(case: dict, mode: str) -> dict:
     }
 
 
-def fingerprint() -> str:
-    """Everything the gate's result depends on (Constitution IV: no repeat without a change)."""
+def fingerprint(suite: str | None = None) -> str:
+    """Everything the suite's gate result depends on (Constitution IV: no repeat without a change): the model, the
+    prompts, the tool loop, the suite's cases and its own connector type's playbook folder only."""
+    suite = suite or SUITE
     h = hashlib.sha256(MODEL_ID.encode())
-    roots = [AGENT / "src" / "onboarding_agent" / "prompts", REPO / "onboarding" / "catalog" / "playbooks", CASES]
+    playbook = REPO / "onboarding" / "catalog" / "playbooks" / SUITES[suite]["type"]
+    roots = [AGENT / "src" / "onboarding_agent" / "prompts", playbook, cases_dir(suite)]
     files = sorted(f for r in roots for f in r.rglob("*") if f.is_file() and f.suffix != ".png")
     files.append(AGENT / "src" / "onboarding_agent" / "loop.py")
     for f in files:
@@ -172,7 +222,8 @@ async def once(case: dict, mode: str) -> tuple[bool, bool, str]:
             for k, v in e.items():
                 if k != "type":
                     USAGE[k] = USAGE.get(k, 0) + v
-    side_ok = bool(SIDE[case["side"]].search(reply))
+    sides = ENTRA_SIDE if SUITES[SUITE]["type"] == "entra-id" else SIDE
+    side_ok = True if case.get("side") in (None, "any") else bool(sides[case["side"]].search(reply))
     cause_ok = any(re.search(c, reply, re.I) for c in case["cause"])
     return side_ok, cause_ok, reply
 
@@ -206,21 +257,28 @@ async def plan_once(case: dict) -> tuple[bool, bool, str]:
 
 
 async def main(args: argparse.Namespace) -> int:
-    cases = yaml.safe_load((CASES / "cases.yaml").read_text())
+    global SUITE
+    SUITE = getattr(args, "suite", None) or "aws_saas_failures"
+    gate = gate_file(SUITE)
+    cases = yaml.safe_load((cases_dir(SUITE) / "cases.yaml").read_text())
+    for case in cases:
+        case.setdefault("modes", ["text", "screenshot"])
     if args.cases:
         wanted = set(args.cases.split(","))
         cases = [c for c in cases if c["id"] in wanted]
     modes = ["text", "screenshot"] if args.mode == "both" else [args.mode]
     full_gate = args.gate and not args.cases and args.mode == "both"
-    print_ = fingerprint() if full_gate else ""
-    if full_gate and not args.force and GATE_FILE.exists():
-        last = json.loads(GATE_FILE.read_text())
+    print_ = fingerprint(SUITE) if full_gate else ""
+    if full_gate and not args.force and gate.exists():
+        last = json.loads(gate.read_text())
         if last.get("fingerprint") == print_:
             print(f"Gate unchanged since its last pass ({last['at']}: {last['result']}); not calling the model. "
                   "Use --force to run it anyway.")
             return 0
-    calls, usd = estimate((len(cases) * len(modes) + (0 if args.cases else 1)) * args.runs)
-    print(f"Estimate: {len(cases)} cases × {len(modes)} modes × {args.runs} runs → about {calls} Claude Haiku calls "
+    with_plan = SUITES[SUITE]["plan"] and not args.cases
+    turns = sum(len([m for m in modes if m in c["modes"]]) for c in cases) + (1 if with_plan else 0)
+    calls, usd = estimate(turns * args.runs)
+    print(f"Suite {SUITE}: {len(cases)} cases × {len(modes)} modes × {args.runs} runs → about {calls} Claude Haiku calls "
           f"on Bedrock, about ${usd:.2f}{' (forced)' if args.force else ''}.")
     if args.estimate:
         return 0
@@ -237,7 +295,7 @@ async def main(args: argparse.Namespace) -> int:
     failed = 0
     print(f"{'case':<6}{'mode':<12}{'side':>6}{'cause':>7}{'both':>6}  result")
     for case in cases:
-        for mode in modes:
+        for mode in [m for m in modes if m in case["modes"]]:
             runs = await asyncio.gather(*(guarded(case, mode) for _ in range(args.runs)))
             side = sum(r[0] for r in runs)
             cause = sum(r[1] for r in runs)
@@ -248,8 +306,8 @@ async def main(args: argparse.Namespace) -> int:
             if not ok and args.verbose:
                 miss = next(r[2] for r in runs if not (r[0] and r[1]))
                 print(textwrap.indent(miss[:700], "      | "))
-    if not args.cases or "plan" in args.cases.split(","):
-        plan_case = yaml.safe_load((CASES / "plan_left.yaml").read_text())
+    if SUITES[SUITE]["plan"] and (not args.cases or "plan" in args.cases.split(",")):
+        plan_case = yaml.safe_load((cases_dir(SUITE) / "plan_left.yaml").read_text())
 
         async def guarded_plan() -> tuple[bool, bool, str]:
             async with sem:
@@ -267,15 +325,16 @@ async def main(args: argparse.Namespace) -> int:
         if not ok and args.verbose:
             print(textwrap.indent(next(r[2] for r in runs if not (r[0] and r[1]))[:700], "      | "))
         cases = [*cases, {"id": "plan"}]
-    total = len(cases) * len(modes) - (len(modes) - 1 if any(c["id"] == "plan" for c in cases) else 0)
+    total = sum(len([m for m in modes if m in c.get("modes", modes)]) for c in cases if c["id"] != "plan") \
+        + (1 if any(c["id"] == "plan" for c in cases) else 0)
     print(f"\n{total - failed}/{total} case×mode passed (bar: {PASS_RATE:.0%} of {args.runs} runs each)")
     print(f"Actual: {USAGE.get('calls', 0)} model calls, {USAGE.get('input_tokens', 0):,} input + "
           f"{USAGE.get('cache_write_tokens', 0):,} cache-write + {USAGE.get('cache_read_tokens', 0):,} cache-read + "
           f"{USAGE.get('output_tokens', 0):,} output tokens, about ${cost(USAGE):.2f}, "
           f"{time.monotonic() - started:.0f} s.")
     if full_gate and not failed:
-        GATE_FILE.parent.mkdir(exist_ok=True)
-        GATE_FILE.write_text(json.dumps({"fingerprint": print_, "result": f"{total}/{total} passed at {args.runs} runs",
+        gate.parent.mkdir(exist_ok=True)
+        gate.write_text(json.dumps({"fingerprint": print_, "result": f"{total}/{total} passed at {args.runs} runs",
                                          "at": time.strftime("%Y-%m-%d %H:%M"), "usage": USAGE}))
     return 1 if failed else 0
 
@@ -287,6 +346,7 @@ if __name__ == "__main__":
     parser.add_argument("--estimate", action="store_true", help="print the expected calls and cost, then stop")
     parser.add_argument("--force", action="store_true", help="run the gate even if nothing changed")
     parser.add_argument("--cases", default="")
+    parser.add_argument("--suite", choices=sorted(SUITES), default="aws_saas_failures")
     parser.add_argument("--mode", choices=["text", "screenshot", "both"], default="both")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("-v", "--verbose", action="store_true")

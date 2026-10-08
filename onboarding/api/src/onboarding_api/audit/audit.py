@@ -11,6 +11,9 @@ from ..masking import mask_obj
 Kind = Literal[
     "sign_in", "sign_in_failed", "locked", "user_created", "user_disabled", "password_reset", "role_changed",
     "tenant_added", "credential_replaced", "session_reopened", "session_handover",
+    # spec 002: never the secret value
+    "application_secret_received", "application_secret_replaced", "application_secret_vault_deleted",
+    "secret_exposed_in_chat", "provisioning_warning_accepted",
 ]
 
 

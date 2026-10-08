@@ -114,25 +114,104 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
                                              "explicit order; for a broken connector instance).",
                               "input_schema": {"type": "object", "properties": {}},
                               "progress": "deleting the session's source in SailPoint…"},
+    # spec 002: generic tools offered only to playbooks that list them in checks.yaml `tools` (research R5)
+    "check_tenant_features": {"description": "At session start: check this ISC tenant offers the connector and, for AI "
+                                             "agents, the machine identity features.",
+                              "input_schema": {"type": "object", "properties": {}},
+                              "progress": "checking what this SailPoint tenant offers…"},
+    "find_connector_sources": {"description": "List existing sources on this connector for the session's tenant, "
+                                              "with owner (call at session start; offer extend-source if one exists).",
+                               "input_schema": {"type": "object", "properties": {}},
+                               "progress": "looking for existing sources for this tenant in SailPoint…"},
+    "adopt_source": {"description": "Extend-source: bind an existing source of this connector, tenant and source "
+                                    "owner to the session (refuses anyone else's source). Only on the IAM engineer's "
+                                    "order.",
+                     "input_schema": {"type": "object", "properties": {"source_id": {"type": "string"}},
+                                      "required": ["source_id"]},
+                     "progress": "checking the existing source in SailPoint…"},
+    "read_source_setup": {"description": "Read what the session's source has: capability settings, account schema "
+                                         "attributes, account-creation policy and matching rule.",
+                          "input_schema": {"type": "object", "properties": {}},
+                          "progress": "reading the source's settings in SailPoint…"},
+    "ensure_schema_attributes": {"description": "Add the missing service-principal attributes to the source's account "
+                                                "model (never changes existing ones).",
+                                 "input_schema": {"type": "object", "properties": {
+                                     "capability": {"type": "string", "enum": ["service_principals"]}}},
+                                 "progress": "updating the account model in SailPoint…"},
+    "aggregate_datasets": {"description": "Aggregate the source's switched-on machine-identity datasets (Azure AI "
+                                          "Foundry agents) and report how many AI agents were found.",
+                           "input_schema": {"type": "object", "properties": {}},
+                           "progress": "aggregating AI agents in SailPoint…"},
+    "count_ai_agents": {"description": "Count the AI agents now on the source, e.g. after the IAM engineer started the "
+                                       "dataset aggregation in ISC.",
+                        "input_schema": {"type": "object", "properties": {}},
+                        "progress": "counting AI agents in SailPoint…"},
+    "set_dataset_schedule": {"description": "Turn a dataset's scheduled aggregation on or off.",
+                             "input_schema": {"type": "object", "properties": {
+                                 "dataset_id": {"type": "string", "default": "azure:foundry"},
+                                 "on": {"type": "boolean", "default": True}}},
+                             "progress": "updating the dataset schedule in SailPoint…"},
+    "set_provisioning_policy": {"description": "Set how SailPoint creates new accounts (keeps an existing definition "
+                                               "unless replace is true and the IAM engineer asked for it).",
+                                "input_schema": {"type": "object", "properties": {"replace": {"type": "boolean"}}},
+                                "progress": "setting the account-creation policy in SailPoint…"},
+    "set_correlation": {"description": "Set how accounts are matched to identities.",
+                        "input_schema": {"type": "object", "properties": {}},
+                        "progress": "setting account matching in SailPoint…"},
+    "lifecycle_review": {"description": "The prepared leaver (lifecycle-state) account actions to show the IAM engineer "
+                                        "for review. Never applied by the agent.",
+                         "input_schema": {"type": "object", "properties": {}}, "progress": None},
+    "apply_application_secret": {"description": "Put the new secret from the secret field into the session's source "
+                                                "(the value never passes through you).",
+                                 "input_schema": {"type": "object", "properties": {}},
+                                 "progress": "applying the new secret in SailPoint…"},
+    "record_application_id": {"description": "Record the Application (client) ID shown in the Entra administrator's "
+                                             "output of the app registration step (not a secret).",
+                              "input_schema": {"type": "object", "properties": {"client_id": {"type": "string"}},
+                                               "required": ["client_id"]}, "progress": None},
+    "request_new_secret": {"description": "Ask the application owner for a new client secret through the secret field "
+                                          "(invalid, expired or exposed secret). Never ask for it in the chat.",
+                           "input_schema": {"type": "object", "properties": {
+                               "reason": {"type": "string", "maxLength": 160}}, "required": ["reason"]},
+                           "progress": None},
 }
 
 CACHE = {"type": "ephemeral"}
 USAGE_FIELDS = (("input_tokens", "input_tokens"), ("cache_creation_input_tokens", "cache_write_tokens"),
                 ("cache_read_input_tokens", "cache_read_tokens"), ("output_tokens", "output_tokens"))
 ROLE_LABEL = {"iam_engineer": "IAM engineer", "application_owner": "application owner"}
-CHECK_TOOLS = {"peek_accounts", "start_aggregation", "test_connection"}
-CHECK_ORDER = {"peek_accounts": 0, "start_aggregation": 1, "test_connection": 2}
+SESSION_TOOLS = ("post_to_other_thread", "notify_other_thread", "set_waiting", "suggest_replies", "update_plan",
+                 "note_diagnosis")
+# The ISC tools of 001, offered to a playbook without a `checks.yaml` `tools` list (AWS SaaS, unchanged: SC-106).
+LEGACY_ISC_TOOLS = ("get_tenant_external_id", "get_connector_form", "find_source", "get_task", "create_source",
+                    "configure_source", "peek_accounts", "start_aggregation", "test_connection",
+                    "delete_session_source")
+RERUN_TOOLS = ("peek_accounts", "start_aggregation", "test_connection", "aggregate_datasets")
+LEGACY_CHECKS = ("peek_accounts", "start_aggregation", "test_connection")
 
 
-def offered_tools(role: str, check_order: dict | None = None, has_source: bool = False) -> list[str]:
+def check_tools(pb: Playbook | None = None) -> list[str]:
+    """The checks an owner's confirmation may rerun, in the order SailPoint needs them (playbook `checks.order`)."""
+    order = (pb.checks.get("order") if pb else None) or LEGACY_CHECKS
+    return [name for name in order if name in RERUN_TOOLS]
+
+
+def offered_tools(role: str, check_order: dict | None = None, has_source: bool = False, pb: Playbook | None = None,
+                  trigger: str | None = None) -> list[str]:
     """The role gate (FR-016, FR-016a, FR-019): SailPoint write tools only for the IAM engineer's turns. An
-    application owner's turn gets the three check tools only while the IAM engineer's standing check order is set
-    and a source exists, so their confirmation of a fix can rerun the checks; never create, configure or delete."""
+    application owner's turn gets the check tools only while the IAM engineer's standing check order is set and a
+    source exists, so their confirmation of a fix can rerun the checks; never create, configure or delete. Spec 002:
+    the ISC tools are the playbook's `checks.yaml` `tools` (001's set without one), and an owner's secret submission
+    under a standing order may also apply the new secret (`trigger: secret_submitted`)."""
+    isc = (pb.checks.get("tools") if pb else None) or LEGACY_ISC_TOOLS
+    base = [name for name in TOOL_SPECS if name in SESSION_TOOLS or name in isc]
     if role == "iam_engineer":
-        return list(TOOL_SPECS)
+        return base
     reruns = bool(check_order) and has_source
-    return [name for name in TOOL_SPECS
-            if name not in WRITE_TOOLS or (reruns and name in CHECK_TOOLS)]
+    allowed = set(check_tools(pb)) if reruns else set()
+    if reruns and trigger == "secret_submitted":
+        allowed.add("apply_application_secret")
+    return [name for name in base if name not in WRITE_TOOLS or name in allowed]
 
 
 def _fill(template: str, values: dict[str, str]) -> str:
@@ -148,10 +227,11 @@ def _template(lang: str, name: str) -> str:
 
 
 def static_system(payload: dict, pb: Playbook) -> str:
-    """Rules and playbook: identical for every turn of a session (no writer, thread or state in it), so it caches."""
+    """Rules and playbook: identical for every turn of a session (no writer, thread or state in it), so it caches. A
+    playbook's own `prompt.md` (spec 002) is appended; without one the text is exactly 001's."""
     session = payload["session"]
     entry = pb.entry
-    return _fill(_template(payload.get("lang", "en"), "system.md"), {
+    text = _fill(_template(payload.get("lang", "en"), "system.md"), {
         "tenant_name": str((session.get("tenant") or {}).get("name", "")),
         "owner_label": entry.get("owner_label", "application owner"),
         "application_label": entry.get("application_label", "the application"),
@@ -160,6 +240,7 @@ def static_system(payload: dict, pb: Playbook) -> str:
         "collisions": pb.render(pb.collisions),
         "failures": pb.render(pb.failures),
     })
+    return text + ("\n\n" + pb.render(pb.prompt).strip() + "\n" if pb.prompt.strip() else "")
 
 
 def system_prompt(payload: dict, pb: Playbook) -> str:
@@ -188,7 +269,7 @@ def turn_system(payload: dict, pb: Playbook) -> str:
         gate = (f"This message is from the application owner. The IAM engineer ({check_order['display_name']}) "
                 "ordered the checks earlier and that order stands: if the application owner confirms an "
                 "application-side fix is done, rerun the failed check and the checks after it now, in this turn "
-                "(`peek_accounts` → `start_aggregation` → `test_connection`), without asking the IAM engineer again "
+                f"({' → '.join(f'`{t}`' for t in check_tools(pb))}), without asking the IAM engineer again "
                 "and without asking for a verification command first (the connection check is the verification). "
                 "These are SailPoint results, so they belong in full in the IAM engineer's thread: call "
                 "`post_to_other_thread` with the full results as `text` and a one-line `relay_note`; in this reply "
@@ -211,8 +292,13 @@ def turn_system(payload: dict, pb: Playbook) -> str:
     suggestion_defaults = "\n".join(
         f"- {labels[r]}: " + "; ".join(f'"{t}"' for t in (defaults.get(r) or [])[:4]) for r in labels if defaults.get(r))
     values = {k: v for k, v in pb.values.items() if not k.startswith("policy_")}
-    session_values = json.dumps({"steps": session.get("steps"), "source": session.get("source"), **values},
-                                default=str, indent=1)
+    shown = {"steps": session.get("steps"), "source": session.get("source"), **values}
+    secret = session.get("application_secret")
+    if secret:  # spec 002: state and expiry only; the vault provider name stays in tool code
+        shown["application_secret"] = {"state": secret.get("state"), "expires_on": secret.get("expires_on")}
+    if session.get("mode"):
+        shown["mode"] = session["mode"]
+    session_values = json.dumps(shown, default=str, indent=1)
     return _fill(_template(payload.get("lang", "en"), "turn.md"), {
         "iam_engineer_name": ordered["display_name"] if role == "iam_engineer" else "the IAM engineer",
         "owner_name": ordered["display_name"] if role == "application_owner" else "the application owner",
@@ -286,7 +372,12 @@ async def run_turn(payload: dict, pb: Playbook, isc_tools: IscTools, session_too
         claude = AsyncAnthropicBedrock(aws_region=os.environ.get("AWS_REGION", "ap-southeast-1"))
     model = os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
     role = payload["ordered_by"]["role"]
-    names = offered_tools(role, payload.get("check_order"), bool(payload["session"].get("source")))
+    names = offered_tools(role, payload.get("check_order"), bool(payload["session"].get("source")), pb=pb,
+                          trigger=payload.get("trigger"))
+    # Tools asked for in one round run in the order SailPoint needs: the checks (001), or, for a playbook that lists
+    # its tools (spec 002), its whole `checks.yaml` order (create → configure → … → dataset schedule).
+    sequence = (pb.checks.get("order") if pb.checks.get("tools") else None) or check_tools(pb)
+    order = {name: i for i, name in enumerate(sequence)}
     tools = [{"name": n, "description": TOOL_SPECS[n]["description"], "input_schema": TOOL_SPECS[n]["input_schema"]}
              for n in names]
     tools[-1] = {**tools[-1], "cache_control": CACHE}
@@ -308,7 +399,7 @@ async def run_turn(payload: dict, pb: Playbook, isc_tools: IscTools, session_too
         uses = [b for b in final.content if b.type == "tool_use"]
         # Several checks asked for in one round always run in the order SailPoint needs (Test Connection reports
         # "req.input is null" before the first aggregation, F5); everything else keeps the model's order.
-        uses.sort(key=lambda b: CHECK_ORDER.get(b.name, -1))
+        uses.sort(key=lambda b: order.get(b.name, -1))
         messages.append({"role": "assistant", "content": [b.model_dump(exclude_none=True) for b in final.content]})
         if not uses:
             break
@@ -360,8 +451,10 @@ def _add_usage(usage: dict, final: Any) -> None:
 SECRET_CHECK_PROMPT = (
     "You are a security filter. Look at this screenshot and decide whether it visibly shows a secret: an AWS secret "
     "access key, an access key id (AKIA… / ASIA…), a session token, a password, an API key or client secret, a "
-    "private key, or a bearer/JWT token. Account ids, ARNs, role names, External IDs, user names and error messages "
-    "are NOT secrets. Reply with exactly one line: PASSED, or HELD: <what kind of secret, without repeating it>."
+    "private key, or a bearer/JWT token, including a Microsoft Entra \"Certificates & secrets\" page whose Value "
+    "column shows the characters of a client secret. Account ids, ARNs, role names, External IDs, Application "
+    "(client) IDs and secret IDs (GUIDs), user names and error messages are NOT secrets. Reply with exactly one "
+    "line: PASSED, or HELD: <what kind of secret, without repeating it>."
 )
 
 

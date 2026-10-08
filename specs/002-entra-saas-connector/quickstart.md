@@ -8,7 +8,7 @@ assumed: cluster, images, agent runtime, admin, one usable ISC tenant, one IAM e
 - §1–3 and §5 are free: ISC stub and scripted model.
 - §4 uses a real Entra tenant, a real ISC tenant and the real model. That is about 30–60 Claude Haiku calls, about
   $0.50–$1, and the command prints the estimate first.
-- §6 (evals) is opt-in and prints its estimate: 11 cases × 3 runs ≈ 33 calls, about $0.40.
+- §6 (evals) is opt-in and prints its estimate: 11 cases × 2 modes × 3 runs ≈ 330 calls, about $1.30 (`--mode text`: about $0.65); setup checks about 60 calls, about $0.25.
 
 ## 1. Unit and integration tests (free)
 
@@ -73,7 +73,7 @@ Scenarios, all on the scripted model against `stub_isc.py` `/v2026` routes:
    3. A pre-existing stub policy is kept.
    4. The proof makes no directory write: the stub records no account create.
    5. Lifecycle actions appear for review only.
-6. **Long aggregation (FR-139).** With `_stub/entra/slow_aggregation?minutes=35` and the test clock speed-up: the
+6. **Long aggregation (FR-139).** With `/_stub/entra/slow_aggregation?polls=N` (the API test drives the clock: `followups.check_once(now)`): the
    step shows "pending · 30 min". The result note arrives in the IAM engineer's thread with nobody's message, and
    the proof continues.
 7. **Extend-source (FR-105).**
@@ -147,7 +147,7 @@ make onboarding-agent-delete   # also deletes leftover onboarding-entra-* API-ke
 
 ```bash
 cd onboarding/agent
-uv run python tests/evals/run_evals.py --suite entra_failures --estimate   # ~33 calls, ~$0.40; then without --estimate
+uv run python tests/evals/run_evals.py --suite entra_failures --estimate   # ~330 calls, ~$1.30; then without --estimate
 uv run python tests/evals/run_evals.py --suite entra_failures --gate       # 10 runs; skipped unless the Entra fingerprint changed
 ```
 

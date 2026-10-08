@@ -304,12 +304,12 @@ Phase 0 decisions. Numbering is local to this feature (R1–R14). References lik
   - **e2e (Playwright, scripted model)**: `entra-onboarding.spec.ts` (two browsers; secret field; status chip;
     proof counts) and `entra-secret-leak.spec.ts` (seeded secret not found anywhere).
   - **Evals (opt-in)**: `tests/evals/entra_failures/cases.yaml`, 11 cases (E1–E11) × 3 runs ≈ 33 Haiku calls,
-    about $0.40 with caching. The estimate is printed first, and `--gate` (10 runs) runs only when the Entra
+    about $1.30 for text and screenshots (the runner's own estimate: ~5 model calls per turn × 11 cases × 2 modes × 3 runs ≈ 330 calls; `--mode text` halves it). The estimate is printed first, and `--gate` (10 runs) runs only when the Entra
     fingerprint changes.
   - **Fingerprints are per suite**: the suite's cases, `playbooks/<its connector type>/`, `prompts/` and `loop.py`.
     Shared prompts and `loop.py` still count, so the first Entra change re-runs the AWS gate **once**. That run is
     stated with its estimate (about 100 calls, about $1.20 at 10 runs × ~10 cases) before it starts (tasks T092).
-  - **Setup-check evals (opt-in)**: `tests/evals/entra_setup_checks/cases.yaml`, 4 cases × 3 runs ≈ 12 calls
+  - **Setup-check evals (opt-in)**: `tests/evals/entra_setup_checks/cases.yaml`, 4 cases × 3 runs ≈ 60 calls
     (~$0.15), for FR-112.
   - **Real-tenant check (opt-in)**: quickstart §4 on a test Entra tenant and ISC tenant. This uses the real model
     (stated cost about 30–60 calls, about $0.50–$1) and is required before release for provisioning (001 FR-028).

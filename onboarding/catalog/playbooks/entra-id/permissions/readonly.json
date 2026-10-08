@@ -1,0 +1,36 @@
+{
+  "profile": "readonly",
+  "description": "Minimum for account + entitlement aggregation (users, groups, licences, directory roles, app roles). Always included.",
+  "resources": [
+    {
+      "api": "Microsoft Graph",
+      "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        {
+          "name": "User.Read.All",
+          "why": "Account aggregation, delta aggregation, get object, user group/role memberships"
+        },
+        {
+          "name": "Group.Read.All",
+          "why": "Group aggregation and memberships"
+        },
+        {
+          "name": "Organization.Read.All",
+          "why": "Licence (subscribedSkus) aggregation"
+        },
+        {
+          "name": "RoleManagement.Read.Directory",
+          "why": "Directory roles as entitlements"
+        },
+        {
+          "name": "Application.Read.All",
+          "why": "applicationRole entitlements (app roles of enterprise apps) \u2014 without it entitlement aggregation fails with 403 Authorization_RequestDenied on that object type (seen live 2026-10-08)"
+        },
+        {
+          "name": "AuditLog.Read.All",
+          "why": "signInActivity (last sign-in) on accounts; remove if not needed"
+        }
+      ]
+    }
+  ]
+}

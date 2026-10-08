@@ -121,6 +121,10 @@ class Call:
             "role_name": str(self.values.get("role_name") or "the SailPoint role"),
             "left": ", ".join(left),
             "first_steps": setup.group(1).strip() if setup else "(the setup steps)",
+            # spec 002: values the Entra scripts reuse from tool results
+            "source_id": (re.search(r'"sources": \[\{"id": "([0-9a-f]{32})"', self.results) or [None, ""])[1],
+            "ui_path": json.loads('"' + (re.search(r'"ui_path": "([^"]+)"', self.results)
+                                         or [None, "the source in ISC"])[1] + '"'),
         }
 
 
@@ -135,6 +139,8 @@ def _matches(when: dict, call: Call) -> bool:
         "not_last": lambda v: re.search(v, call.last, re.I | re.S) is None,
         "tool_offered": lambda v: v in call.tools,
         "tool_not_offered": lambda v: v not in call.tools,
+        # spec 002: rules for one connector type only (its name as the system prompt states it)
+        "connector": lambda v: f"connector type **{v}**" in call.system,
     }
     return all(checks[k](v) for k, v in (when or {}).items())
 

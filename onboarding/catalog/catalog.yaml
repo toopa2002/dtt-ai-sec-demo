@@ -30,13 +30,74 @@ types:
 
   - id: entra-id
     name: Microsoft Entra ID
-    status: planned
-    description: Users, groups and app role assignments from a Microsoft Entra ID tenant.
+    status: available
+    badge: new
+    description: >-
+      Users, groups, directory roles, licences and app roles from a Microsoft Entra tenant through SailPoint's cloud
+      Microsoft Entra connector (no virtual appliance); optionally service principals, Azure AI Foundry agents and
+      provisioning. Read-only by default.
     owner_label: Entra administrator
     application_label: Entra ID
-    owner_asks: Register an app with read permissions and grant admin consent.
-    agent_configures: "Entra ID source: tenant, app credentials, scope."
-    session_fields: []
+    first_step_label: Entra app ready
+    owner_asks: >-
+      Register the SailPoint app, add the permissions for the chosen capabilities, grant admin consent, and put the
+      client secret's Value in the secret field, never the chat.
+    agent_configures: >-
+      Microsoft Entra source: tenant domain, application ID, vaulted secret, capability settings; then connection
+      check, Test Connection, entitlement and account aggregation, and each capability's check.
+    isc_api: v2026
+    secret:
+      label: Client secret Value
+      help: "Certificates & secrets → the Value column, shown only once"
+      expires_help: The Expires date shown next to it
+    # spec 002 contracts/entra-playbook.md; owner_summary {permission_count} is counted from permissions/<file>.json
+    capabilities:
+      - id: directory
+        label: Directory
+        always: true
+        tag: read_only
+        permissions: readonly
+        summary: Users, groups incl. Microsoft 365, directory roles, licences, app roles.
+        owner_summary: "Directory: {permission_count} read permissions"
+      - id: service_principals
+        label: Service principals as accounts
+        tag: read_only
+        permissions: machine-identity
+        summary: Application service principals with their roles, app roles, groups and consented permissions.
+        owner_summary: "Service principals: {permission_count} read permissions"
+      - id: ai_agents
+        label: AI agents (Azure AI Foundry)
+        tag: read_only
+        permissions: ai-agents
+        requires_fields: [foundry_subscriptions]
+        summary: Foundry agents as machine identities, aggregated on a schedule. Copilot Studio and Agent 365 stay off.
+        owner_summary: >-
+          AI agents: Reader and Cognitive Services Data Contributor on each subscription, plus the Azure management
+          consent
+      - id: provisioning
+        label: Provisioning
+        tag: writes
+        permissions: provisioning
+        requires_fields: [upn_domain, usage_location]
+        summary: "Joiner, mover and leaver: ISC creates and changes Entra accounts."
+        owner_summary: "Provisioning: {permission_count} write permissions and the User Administrator role"
+        warning: >-
+          ISC will be able to create, change, disable and delete users and groups in {tenant_domain}. The
+          administrator also gives the SailPoint app the User Administrator role. Nothing is written during this
+          session; the first real joiner is the first write.
+    session_fields:
+      - { name: source_name, label: Source name, type: string, required: true }
+      - { name: source_owner, label: Source owner (ISC alias, email or id), type: string, required: true }
+      - { name: tenant_domain, label: Entra tenant domain, type: entra_tenant, required: true }
+      - { name: app_name, label: App registration name, type: string, required: true, default: "SailPoint ISC - {tenant}" }
+      - { name: capabilities, label: Capabilities, type: capabilities, required: true }
+      - { name: foundry_subscriptions, label: Azure subscriptions with Foundry agents, type: guid_list, required: false, show_if: ai_agents }
+      - { name: upn_domain, label: Domain for new accounts, type: domain, required: false, show_if: provisioning }
+      - { name: usage_location, label: Usage location, type: country_code, required: false, default: TH, show_if: provisioning }
+      - { name: source_mode, label: Source, type: string, required: false, default: new, choices: [new, extend] }
+      - { name: client_id, label: Application (client) ID, type: string, required: false }
+    playbook: playbooks/entra-id
+
   - id: active-directory
     name: Active Directory
     status: planned

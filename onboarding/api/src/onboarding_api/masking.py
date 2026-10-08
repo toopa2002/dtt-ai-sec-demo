@@ -32,6 +32,10 @@ _PATTERNS: list[re.Pattern[str]] = [
     ),
 ]
 
+# Microsoft Entra client secret Values (spec 002 research R3): three characters, a digit, the marker `Q~`, then 31–34
+# more. The marker exists so secret scanners can find them; GUIDs and ordinary base64 output don't match.
+ENTRA_SECRET = re.compile(r"(?<![A-Za-z0-9_.~-])[A-Za-z0-9_.-]{3}\dQ~[A-Za-z0-9_.~-]{31,34}(?![A-Za-z0-9_.~-])")
+
 # Bare 40-char AWS secret keys on their own (e.g. pasted from the console's "show secret" box).
 _BARE_AWS_SECRET = re.compile(r"(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]*[/+])(?=[A-Za-z0-9/+]*[a-z])"
                               r"(?=[A-Za-z0-9/+]*[A-Z])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])")
@@ -50,8 +54,14 @@ def mask(text: str) -> tuple[str, bool]:
         else:  # generic key: value — keep the key and separator, mask the value
             out = pattern.sub(lambda m: m.group(0)[: m.start(2) - m.start(0)] + MASK, out)
         del i
+    out = ENTRA_SECRET.sub(MASK, out)
     out = _BARE_AWS_SECRET.sub(MASK, out)
     return out, out != text
+
+
+def contains_entra_secret(text: str) -> bool:
+    """True when the text holds an Entra client secret Value (spec 002 R17: the pasted secret counts as exposed)."""
+    return bool(text and ENTRA_SECRET.search(text))
 
 
 def mask_text(text: str) -> str:

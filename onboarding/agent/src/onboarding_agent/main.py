@@ -1,7 +1,8 @@
 """AgentCore runtime entrypoint (contracts/agent-invocation.md). Streams one JSON event per chunk.
 
 Modes: `turn` (one queued participant message), `secret_check` (screenshot filter, FR-026a), `tenant_check` (token via
-AgentCore Identity + GET /beta/tenant, for the admin's "Check now"). The runtime is stateless per turn.
+AgentCore Identity + GET /beta/tenant, for the admin's "Check now"), `task_check` (spec 002 FR-139: the status of
+long-running SailPoint tasks, no model call). The runtime is stateless per turn.
 """
 
 import asyncio
@@ -40,20 +41,22 @@ async def model_info(_: Request) -> JSONResponse:
 app.add_route("/model", model_info, methods=["GET"])
 
 
-def _isc(tenant: dict, workload_name: str | None = None) -> IscClient:
+def _isc(tenant: dict, workload_name: str | None = None, experimental: list[str] | None = None) -> IscClient:
+    """`experimental`: the playbook's `experimental_paths` (spec 002); None keeps the header on every call."""
     static = os.environ.get("ONBOARDING_ISC_TOKEN")  # local runs against the ISC stub only; never set on AgentCore
     if static:
         async def token() -> str:
             return static
 
-        return IscClient(tenant["api_host"], token)
-    return IscClient(tenant["api_host"], agentcore_token_fn(tenant["credential_provider"], REGION, workload_name))
+        return IscClient(tenant["api_host"], token, experimental=experimental)
+    return IscClient(tenant["api_host"], agentcore_token_fn(tenant["credential_provider"], REGION, workload_name),
+                     experimental=experimental)
 
 
 async def _run_turn(payload: dict, emit) -> None:  # type: ignore[no-untyped-def]
     session = payload["session"]
     pb = playbooks.for_session(session)
-    isc = _isc(session["tenant"], payload.get("workload_name"))
+    isc = _isc(session["tenant"], payload.get("workload_name"), pb.settings.get("experimental_paths"))
     try:
         role = payload["ordered_by"]["role"]
         thread = payload.get("message", {}).get("thread") or role
@@ -62,6 +65,55 @@ async def _run_turn(payload: dict, emit) -> None:  # type: ignore[no-untyped-def
         await loop.run_turn(payload, pb, tools, SessionTools(emit, thread), emit, claude=MODEL)
     finally:
         await isc.close()
+
+
+async def _task_check(payload: dict) -> dict:
+    """Model-free (Constitution IV): read each task's status with the version the playbook uses."""
+    from .isc import paths
+    from .masking_lite import strip_tokens
+
+    table = paths.V2026 if payload.get("isc_api") == "v2026" else paths.LEGACY
+    isc = _isc(payload["tenant"], payload.get("workload_name"), [] if payload.get("isc_api") == "v2026" else None)
+    tasks = []
+    try:
+        for task_id in (payload.get("task_ids") or [])[:10]:
+            task = await isc.get(table("task", task_id=str(task_id)))
+            tasks.append({"id": task_id, "completion_status": task.get("completionStatus"),
+                          "messages": [strip_tokens(str(m.get("localizedText") or m.get("message") or m.get("key")))
+                                       for m in task.get("messages") or []][:10]})
+        counts = await _task_counts(isc, table, payload.get("counts") or {}, tasks)
+    except IscError as exc:
+        return {"type": "task_check", "error": strip_tokens(str(exc))[:500]}
+    finally:
+        await isc.close()
+    return {"type": "task_check", "tasks": tasks, **({"counts": counts} if counts else {})}
+
+
+async def _task_counts(isc: IscClient, table, want: dict, tasks: list[dict]) -> dict:  # type: ignore[no-untyped-def]
+    """After the followed tasks ended well, the totals for the result note (accounts, users / service principals,
+    entitlements); nothing while a task still runs."""
+    from urllib.parse import quote
+
+    sid = want.get("source_id")
+    if not sid or any(t["completion_status"] not in ("SUCCESS", "WARNING") for t in tasks):
+        return {}
+    flt = f'{table.account_source_field} eq "{sid}"'
+    out: dict = {}
+    if want.get("entitlements"):
+        out["entitlements"] = await isc.count(table("entitlements"), f'source.id eq "{sid}"')
+    if want.get("accounts"):
+        total = await isc.count(table("accounts"), flt)
+        out["accounts"] = total
+        attr = want.get("sp_attribute")
+        if attr and total <= 10_000:
+            sps = 0
+            for offset in range(0, total, 250):
+                page = await isc.get(f"{table('accounts')}?filters={quote(flt, safe='')}&limit=250&offset={offset}")
+                sps += sum(1 for a in page or [] if (a.get("attributes") or {}).get(attr))
+            out["service_principals"], out["users"] = sps, total - sps
+        elif not attr:
+            out["users"] = total
+    return out
 
 
 async def _tenant_check(payload: dict) -> dict:
@@ -93,6 +145,9 @@ async def invoke(payload: dict, context=None) -> AsyncIterator[dict]:  # type: i
         return
     if mode == "tenant_check":
         yield await _tenant_check(payload)
+        return
+    if mode == "task_check":
+        yield await _task_check(payload)
         return
     missing = [k for k in REQUIRED if k not in payload]
     if missing:

@@ -47,7 +47,9 @@ import { WaitingBannerComponent } from './waiting-banner.component';
             <span>{{ m.created_at | date: 'HH:mm' }} · {{ m.text }}</span>
           </p>
         } @else if (m.kind === 'system_note') {
-          <p class="note system" [attr.data-kind]="m.kind" [attr.data-ts]="item.ts">
+          <p class="note system" [attr.data-kind]="m.kind" [attr.data-ts]="item.ts" [attr.data-code]="m.code || null"
+             [class.info]="m.tone === 'info'" [class.success]="m.tone === 'success'" [class.danger]="m.tone === 'danger'"
+             [attr.role]="m.tone === 'danger' ? 'status' : null">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg>
             <span>{{ m.created_at | date: 'HH:mm' }} · {{ m.text }}</span>
           </p>
@@ -156,6 +158,10 @@ import { WaitingBannerComponent } from './waiting-banner.component';
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
     .divider.gap span { font-style: italic; }
     .note.system { color: var(--muted); border-left-color: var(--border); background: var(--surface); }
+    /* spec 002: exposed secret (danger), pending (info), finished (success) */
+    .note.system.info { color: var(--info-strong); border-left-color: var(--info); background: color-mix(in srgb, var(--info) 8%, var(--surface)); font-size: 0.82rem; }
+    .note.system.success { color: var(--ok); border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); font-size: 0.82rem; }
+    .note.system.danger { color: var(--bad); border-left-color: var(--deny); background: color-mix(in srgb, var(--deny) 9%, var(--surface)); font-size: 0.82rem; }
     .bubble.status { display: flex; align-items: flex-start; gap: 0.55rem; background: var(--surface); border: 1px dashed var(--muted);
       color: var(--text); font-size: 0.85rem; }
     .bubble.status .icon { width: 1.05rem; height: 1.05rem; flex: none; margin-top: 0.1rem; fill: none; stroke: currentColor; stroke-width: 2.4;

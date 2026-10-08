@@ -1,0 +1,93 @@
+# Microsoft Entra ID diagnosis evals (spec 002 SC-103, T077): one case per failures.md entry E1–E11. Each runs as
+# pasted text and as a screenshot (rendered from the same text on the first run; fictional tenant and names only).
+# side: application (Entra / Azure / Power Platform) | sailpoint. fails: SailPoint tools that return the error.
+# cause: regexes, any of which must appear in the first reply (case-insensitive). Estimate: 11 cases × 2 modes × 3 runs
+# × ~5 calls ≈ 330 calls ≈ $1.30 for a full read; `--mode text` halves it.
+- id: E1
+  speaker: iam_engineer
+  side: application
+  fails: [peek_accounts, test_connection]
+  error: >-
+    Connection check failed: [Microsoft-Entra]: AADSTS7000215: Invalid client secret provided. Ensure the secret being
+    sent in the request is the client secret value, not the client secret ID, for a secret added to app
+    '3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05'.
+  cause: ['secret.{0,40}(ID|Value)', 'new secret', 'secret field']
+- id: E2
+  speaker: iam_engineer
+  side: application
+  fails: [peek_accounts, test_connection]
+  error: >-
+    Test Connection failed: AADSTS7000222: The provided client secret keys for app
+    '3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05' are expired. Visit the Azure portal to create new keys for your app.
+  cause: ['expired', 'new secret']
+- id: E3
+  speaker: iam_engineer
+  side: application
+  fails: [peek_accounts]
+  error: >-
+    [Microsoft-Entra]: AADSTS700016: Application with identifier '3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05' was not found
+    in the directory 'contoso-demo.onmicrosoft.com'.
+  cause: ['(wrong|another|different) tenant', 'not found', 'just (been )?created|wait', 'domain']
+- id: E4
+  speaker: iam_engineer
+  side: application
+  fails: [peek_accounts]
+  error: >-
+    [Microsoft-Entra]: AADSTS53003: Access has been blocked by Conditional Access policies. The access policy does not
+    allow token issuance.
+  cause: ['conditional access']
+- id: E5
+  speaker: iam_engineer
+  side: application
+  fails: [start_aggregation]
+  error: >-
+    Entitlement aggregation ERROR: Object Type applicationRole: 403 Forbidden Authorization_RequestDenied: Insufficient
+    privileges to complete the operation.
+  cause: ['Application\.Read\.All', 'permission', 'consent']
+- id: E6
+  speaker: application_owner
+  side: application
+  fails: [peek_accounts]
+  error: >-
+    I granted admin consent two minutes ago and the connection check now says 403 Authorization_RequestDenied.
+  cause: ['propagat', 'few minutes|2.?5 minutes|wait']
+- id: E7
+  speaker: iam_engineer
+  side: sailpoint
+  fails: [test_connection]
+  error: >-
+    [cam-router]: Test connection failed: Provided source configuration already exists. [Microsoft-Entra]: 401
+    Unauthorized
+  cause: ['CIEM', 'known (connector )?issue']
+- id: E8
+  speaker: iam_engineer
+  side: sailpoint
+  fails: [peek_accounts]
+  error: >-
+    The connection check read 0 accounts (groups read fine) and the last account aggregation added nothing. Delta
+    Aggregation is on for this source.
+  cause: ['delta', 'full (read|aggregation)']
+- id: E9
+  speaker: iam_engineer
+  side: sailpoint
+  fails: [aggregate_datasets]
+  error: >-
+    Dataset aggregation failed: Microsoft Agent 365 aggregation requires a refresh token when Connection Settings uses
+    Client Credentials. Please add the "agent365RefreshToken" value.
+  cause: ['Agent 365', 'switch (it )?off|turn (it )?off|disable']
+- id: E10
+  speaker: iam_engineer
+  side: application
+  fails: [aggregate_datasets]
+  error: >-
+    Dataset aggregation failed for microsoft:copilot: the application is not an application user in the Power Platform
+    environment (missing Global Discovery Service role / BotReader).
+  cause: ['Copilot Studio', 'Power Platform', 'switch (it )?off|turn (it )?off|disable']
+- id: E11
+  speaker: iam_engineer
+  side: sailpoint
+  fails: [aggregate_datasets]
+  error: >-
+    POST /v2026/sources/2c9180887a3b4c5d6e7f809112233445/aggregate-agents -> HTTP 404: The aggregate-agents endpoint is
+    unavailable
+  cause: ['tenant limitation', 'in (the )?ISC|interface|Machine Identity Datasets']

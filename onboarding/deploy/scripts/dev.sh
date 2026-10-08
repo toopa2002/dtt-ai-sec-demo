@@ -38,6 +38,7 @@ case "${1:-start}" in
     else step "Agent :8092 (Claude Haiku on Bedrock, model ${BEDROCK_MODEL_ID:-default}: paid per message)"; fi
     start_bg agent "$ONB_ROOT/agent" env PORT=8092 AWS_REGION="${AWS_REGION:-ap-southeast-1}" AGENT_MODEL="${AGENT_MODEL:-bedrock}" \
       BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-}" ONBOARDING_ISC_BASE_URL=http://127.0.0.1:8099 ONBOARDING_ISC_TOKEN=stub-token \
+      ONBOARDING_LOCAL_VAULT_URL=http://127.0.0.1:8080 \
       CATALOG_DIR="$ONB_ROOT/catalog" uv run -q python -m onboarding_agent.main
     wait_http http://127.0.0.1:8092/ping; ok "agent"
     step "Session API :8080"

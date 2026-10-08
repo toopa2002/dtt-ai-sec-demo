@@ -1,0 +1,51 @@
+# Default suggested messages per role and session state (FR-006e, research R17; spec 002 R19). Kinds: answer | order |
+# question. The application owner's lists never contain an order (FR-019); `any` has at least 3 per role. States: the
+# 001 states plus waiting_for_secret and tenant_limitation (spec 002).
+
+iam_engineer:
+  no_source:
+    - { text: "Create the connector and run the checks", kind: order }
+    - { text: "What does the Entra administrator have to prepare first?", kind: question }
+    - { text: "Which permissions will the SailPoint app get?", kind: question }
+  check_failed:
+    - { text: "Why did the check fail?", kind: question }
+    - { text: "Rerun the connection check", kind: order }
+    - { text: "What has the Entra administrator been asked to do?", kind: question }
+  tenant_limitation:
+    - { text: "Done, I started it in ISC", kind: answer }
+    - { text: "Where exactly do I start it in ISC?", kind: question }
+    - { text: "Show the leaver actions to review", kind: question }
+  all_passed:
+    - { text: "Summarise what SailPoint now sees", kind: question }
+    - { text: "Is there anything left before I finish the session?", kind: question }
+    - { text: "Show the leaver actions to review", kind: question }
+  any:
+    - { text: "What is left to do?", kind: question }
+    - { text: "Explain the last message", kind: question }
+    - { text: "Show me the current status", kind: question }
+    - { text: "Run the connection check, Test Connection and aggregation", kind: order }
+
+application_owner:
+  waiting_for_owner_output:
+    - { text: "Here is the output:", kind: answer }
+    - { text: "I get an error at this step", kind: answer }
+    - { text: "Explain what this step does", kind: question }
+  waiting_for_secret:
+    - { text: "I've put the new secret in the field", kind: answer }
+    - { text: "Where is the Value column?", kind: question }
+    - { text: "What is left to do?", kind: question }
+  no_source:
+    - { text: "What do I need to set up in Entra first?", kind: question }
+    - { text: "Which permissions will SailPoint get?", kind: question }
+  check_failed:
+    - { text: "Done, I applied the fix", kind: answer }
+    - { text: "I get an error at this step", kind: answer }
+    - { text: "Which Entra page should I screenshot?", kind: question }
+  all_passed:
+    - { text: "What did SailPoint read from Entra?", kind: question }
+    - { text: "Is there anything else I need to do in Entra?", kind: question }
+  any:
+    - { text: "What is left to do?", kind: question }
+    - { text: "Explain the last message", kind: question }
+    - { text: "Show me the current status", kind: question }
+    - { text: "Here is the output:", kind: answer }

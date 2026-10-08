@@ -6,6 +6,7 @@ tools are the only way to reach the other participant's thread (FR-006c), to say
 (FR-006e), to keep the shared plan current (FR-008b) and to explain a failed SailPoint action (FR-020). Milestones
 for the SailPoint checks are set by the ISC tools themselves; the plan's milestones are derived by the API."""
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -109,3 +110,18 @@ class SessionTools:
             return {"ok": False, "error": "text is required"}
         await self.emit({"type": "diagnosis", "text": text})
         return {"ok": True}
+
+    async def request_new_secret(self, reason: str) -> dict[str, Any]:
+        """Spec 002 FR-122/E1/E2: show the owner's secret field again and tell them why; never ask in the chat."""
+        reason = " ".join(str(reason or "").split())[:160]
+        await self.emit({"type": "secret_needed", "reason": reason})
+        return {"ok": True, "next": "The owner sees the secret field again; wait for the new secret (it reaches you "
+                                    "only as 'secret received')."}
+
+    async def record_application_id(self, client_id: str) -> dict[str, Any]:
+        """Spec 002: the Application (client) ID the owner's output showed (not secret); the API keeps only a GUID."""
+        value = str(client_id or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value):
+            return {"ok": False, "error": "that is not an Application (client) ID (a GUID)"}
+        await self.emit({"type": "detail", "name": "client_id", "value": value})
+        return {"ok": True, "client_id": value}

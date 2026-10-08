@@ -17,6 +17,11 @@ if [[ "${1:-}" == --delete ]]; then
               --query "credentialProviders[?starts_with(name, 'onboarding-isc-')].name" --output text 2>/dev/null); do
     aws bedrock-agentcore-control delete-oauth2-credential-provider --region "$AWS_REGION" --name "$p" && ok "deleted $p"
   done
+  step "Deleting leftover application-secret providers (spec 002)"
+  for p in $(aws bedrock-agentcore-control list-api-key-credential-providers --region "$AWS_REGION" \
+              --query "credentialProviders[?starts_with(name, 'onboarding-entra-')].name" --output text 2>/dev/null); do
+    aws bedrock-agentcore-control delete-api-key-credential-provider --region "$AWS_REGION" --name "$p" && ok "deleted $p"
+  done
   aws bedrock-agentcore-control delete-workload-identity --region "$AWS_REGION" --name isc-onboarding-agent 2>/dev/null \
     && ok "deleted workload identity isc-onboarding-agent" || true
   step "Deleting IAM user $ONB_API_USER"
@@ -76,16 +81,18 @@ ROLE=$(grep -oE 'execution_role: arn:aws:iam::[^ ]+' .bedrock_agentcore.yaml | h
 set_env ONBOARDING_AGENT_RUNTIME_ARN "$ARN"
 ok "$ARN"
 
-step "Execution role: Claude Haiku on Bedrock + ISC tokens from AgentCore Identity (onboarding-isc-* only)"
+step "Execution role: Claude Haiku on Bedrock + ISC tokens and application secrets from AgentCore Identity"
 aws iam put-role-policy --role-name "${ROLE##*/}" --policy-name onboarding-agent --policy-document "$(cat <<JSON
 {"Version":"2012-10-17","Statement":[
  {"Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],
   "Resource":["arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*","arn:aws:bedrock:*:$ACCOUNT:inference-profile/$BEDROCK_MODEL_ID"]},
- {"Effect":"Allow","Action":["bedrock-agentcore:GetResourceOauth2Token","bedrock-agentcore:GetWorkloadAccessToken"],
+ {"Effect":"Allow","Action":["bedrock-agentcore:GetResourceOauth2Token","bedrock-agentcore:GetWorkloadAccessToken",
+   "bedrock-agentcore:GetResourceApiKey"],
   "Resource":["arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:workload-identity-directory/default*",
               "arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default*"]},
  {"Effect":"Allow","Action":"secretsmanager:GetSecretValue",
-  "Resource":"arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/oauth2/onboarding-isc-*"}]}
+  "Resource":["arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/oauth2/onboarding-isc-*",
+              "arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/apikey/onboarding-entra-*"]}]}
 JSON
 )"
 ok "role ${ROLE##*/}"
@@ -100,11 +107,16 @@ aws iam put-user-policy --user-name "$ONB_API_USER" --policy-name onboarding-api
    "bedrock-agentcore:DeleteOauth2CredentialProvider","bedrock-agentcore:GetOauth2CredentialProvider"],
   "Resource":["arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default",
               "arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default/oauth2credentialprovider/*"]},
+ {"Effect":"Allow","Action":["bedrock-agentcore:CreateApiKeyCredentialProvider","bedrock-agentcore:UpdateApiKeyCredentialProvider",
+   "bedrock-agentcore:DeleteApiKeyCredentialProvider","bedrock-agentcore:GetApiKeyCredentialProvider"],
+  "Resource":["arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default",
+              "arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default/apikeycredentialprovider/onboarding-entra-*"]},
  {"Effect":"Allow","Action":["bedrock-agentcore:CreateTokenVault","bedrock-agentcore:GetTokenVault"],
   "Resource":"arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default"},
  {"Effect":"Allow","Action":["secretsmanager:CreateSecret","secretsmanager:PutSecretValue","secretsmanager:DeleteSecret",
    "secretsmanager:DescribeSecret","secretsmanager:TagResource"],
-  "Resource":"arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/oauth2/onboarding-isc-*"}]}
+  "Resource":["arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/oauth2/onboarding-isc-*",
+              "arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:bedrock-agentcore-identity!default/apikey/onboarding-entra-*"]}]}
 JSON
 )"
 # One active key, rotated on every deploy. The key goes from IAM straight into the cluster Secret: never printed.

@@ -119,9 +119,28 @@ async def set_plan(session_id: ObjectId, plan: list[dict[str, Any]]) -> list[dic
     return changes
 
 
-async def set_source(session_id: ObjectId, source: dict | None) -> None:
+async def set_source(session_id: ObjectId, source: dict | None, adopted: bool = False) -> None:
     value = {"id": source["id"], "name": source["name"]} if source else None
-    await db().sessions.update_one({"_id": session_id}, {"$set": {"source": value}})
+    if value and adopted:
+        value["adopted"] = True  # spec 002 FR-105: created in an earlier session; never deleted from this one
+    update: dict[str, Any] = {"source": value}
+    if value and adopted:
+        update["mode"] = "extend"
+    await db().sessions.update_one({"_id": session_id}, {"$set": update})
+
+
+async def set_hint(session_id: ObjectId, thread: str, state: str | None) -> None:
+    """Spec 002: a suggestion state the API knows better than the steps do (waiting_for_secret, tenant_limitation)."""
+    await db().sessions.update_one({"_id": session_id}, {"$set": {f"suggestion_hints.{thread}": state}})
+
+
+async def set_proof(session_id: ObjectId, counts: dict[str, Any]) -> dict:
+    """Spec 002 R18: the latest counts for the IAM engineer's "What SailPoint now sees" card."""
+    fields = {f"proof.{k}": v for k, v in counts.items()}
+    fields["proof.updated_at"] = datetime.now(UTC)
+    await db().sessions.update_one({"_id": session_id}, {"$set": fields})
+    session = await db().sessions.find_one({"_id": session_id}, projection={"proof": 1})
+    return (session or {}).get("proof") or {}
 
 
 async def next_counter(session_id: ObjectId, field: str) -> int:

@@ -9,6 +9,9 @@ import { ComposerComponent } from '../shared/composer.component';
 import { LiveSession } from '../shared/live-stream.service';
 import { Action, ConnectorType, Role } from '../shared/models';
 import { PlanPanelComponent } from '../shared/plan-panel.component';
+import { ProofCountsComponent } from '../shared/proof-counts.component';
+import { SecretFieldComponent } from '../shared/secret-field.component';
+import { SecretStatusComponent } from '../shared/secret-status.component';
 import { StatusChipsComponent } from '../shared/status-chips.component';
 import { ThreadComponent } from '../shared/thread.component';
 import { minutes, TimeSync } from '../shared/time-sync';
@@ -26,7 +29,7 @@ const WIDE = '(min-width: 1101px)';
 @Component({
   selector: 'app-session-screen',
   imports: [StatusChipsComponent, ThreadComponent, ComposerComponent, RouterLink, DatePipe, PlanPanelComponent,
-    ActionDialogComponent, NgTemplateOutlet],
+    ActionDialogComponent, NgTemplateOutlet, ProofCountsComponent, SecretFieldComponent, SecretStatusComponent],
   providers: [LiveSession],
   template: `
     @if (error()) {
@@ -38,7 +41,8 @@ const WIDE = '(min-width: 1101px)';
           <h1>{{ s.title }}</h1>
         </div>
         <span class="chip type"><span class="muted" i18n="@@session.connector">Connector type</span> <b>{{ connector()?.name ?? s.connector_type }}</b></span>
-        <app-status-chips [steps]="s.steps" [firstStepLabel]="connector()?.first_step_label ?? defaultFirstStep" />
+        <app-status-chips [steps]="s.steps" [firstStepLabel]="connector()?.first_step_label ?? defaultFirstStep"
+                          [order]="s.milestone_order" />
         <span class="presence">
           <span class="dot" [class.on]="otherOnline()"></span>
           {{ otherRoleLabel() }} {{ otherOnline() ? online : offline }}
@@ -48,23 +52,34 @@ const WIDE = '(min-width: 1101px)';
 
       <div class="layout">
         <aside class="side">
+          @if (role() === 'iam_engineer' && hasCapabilities()) {
+            <app-proof-counts [proof]="s.proof" [capabilities]="capabilities()" [sourceName]="s.source?.name ?? ''" />
+          }
           <app-plan-panel [plan]="s.plan ?? []" [viewerRole]="role()" [nextId]="s.next_step_id ?? null"
-                          [done]="s.plan_done ?? 0" [total]="s.plan_total ?? 0" [ownerLabel]="ownerLabel()" />
+                          [done]="s.plan_done ?? 0" [total]="s.plan_total ?? 0" [ownerLabel]="ownerLabel()"
+                          [followMinutes]="live.followMinutes()" />
+          @if (role() === 'iam_engineer' && connector()?.secret) {
+            <app-secret-status [status]="s.application_secret" />
+          }
           @if (role() === 'iam_engineer') {
             <section class="card actions" aria-label="SailPoint actions" i18n-aria-label="@@side.actionsAria">
               <h2 i18n="@@side.actions">SailPoint actions</h2>
               <p class="muted small" i18n="@@side.actionsHintDetails">Every change the agent made and who ordered it. Open one for the request and response.</p>
               <ol>
                 @for (a of live.actions(); track a.id) {
-                  <li [class.failed]="a.result === 'failed'">
+                  <li [class.failed]="a.result === 'failed'" [class.limited]="a.result === 'tenant_limitation'">
                     <button type="button" class="row" (click)="openAction(a)" [attr.data-action]="a.action">
                       @if (a.result === 'ok') { <svg class="icon ok" viewBox="0 0 24 24" aria-label="passed"><path d="M5 12l5 5L20 7"></path></svg> }
                       @else if (a.result === 'running') { <svg class="icon run" viewBox="0 0 24 24" aria-label="running"><path d="M12 3a9 9 0 1 0 9 9"></path></svg> }
+                      @else if (a.result === 'tenant_limitation') { <svg class="icon limit" viewBox="0 0 24 24" aria-label="tenant limitation"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg> }
                       @else { <svg class="icon bad" viewBox="0 0 24 24" aria-label="failed"><path d="M6 6l12 12M18 6L6 18"></path></svg> }
                       <span class="what"><b>{{ actionLabel(a.action) }}</b> {{ a.source?.name }}
-                        <small class="outcome" [class.error]="a.result === 'failed'">{{ a.outcome ?? a.error ?? a.result }}</small>
+                        @if (a.summary) { <small class="summary mono">{{ a.summary }}</small> }
+                        <small class="outcome" [class.error]="a.result === 'failed'" [class.limit]="a.result === 'tenant_limitation'">{{ a.outcome ?? a.error ?? a.result }}</small>
                         <small>{{ orderedBy }} {{ a.ordered_by.display_name }}
                           @if (a.trigger === 'application_owner_confirmation') { · <span i18n="@@side.rerun">rerun after the application owner confirmed a fix</span> }
+                          @if (a.trigger === 'followup') { · <span i18n="@@side.followup">continued after a long-running step</span> }
+                          @if (a.trigger === 'secret_submitted') { · <span i18n="@@side.secretSubmitted">after a new secret</span> }
                         </small>
                       </span>
                       <time>{{ a.at | date: 'HH:mm' }}</time>
@@ -90,9 +105,11 @@ const WIDE = '(min-width: 1101px)';
                   @if (show(s.details[f.name])) { <dt>{{ f.label }}</dt><dd class="mono">{{ fmt(s.details[f.name]) }}</dd> }
                 }
                 <dt i18n="@@side.tenant">Tenant</dt><dd class="mono">{{ s.tenant?.api_host }}</dd>
-                <dt i18n="@@side.externalId">External ID</dt><dd class="mono">{{ s.tenant?.external_id ?? '—' }}</dd>
-                <dt i18n="@@side.sourceId">Source in SailPoint</dt><dd class="mono">{{ s.source?.id ?? notYet }}</dd>
-                <dt i18n="@@side.access">Access</dt><dd i18n="@@side.accessValue">read-only (aggregation)</dd>
+                @if (!connector()?.secret) {
+                  <dt i18n="@@side.externalId">External ID</dt><dd class="mono">{{ s.tenant?.external_id ?? '—' }}</dd>
+                }
+                <dt i18n="@@side.sourceId">Source in SailPoint</dt><dd class="mono">{{ s.source?.id ?? notYet }}@if (s.source?.adopted) { <span class="muted"> · <span i18n="@@side.extended">extended</span></span> }</dd>
+                <dt i18n="@@side.access">Access</dt><dd>{{ writes() ? readWrite : readOnlyAccess }}</dd>
               </dl>
             </section>
             <app-action-dialog [sessionId]="s.id" [summary]="openedAction()" (closed)="openedAction.set(null)"
@@ -104,13 +121,21 @@ const WIDE = '(min-width: 1101px)';
                 @for (f of connector()?.session_fields ?? []; track f.name) {
                   @if (show(s.details[f.name])) { <dt>{{ f.label }}</dt><dd class="mono">{{ fmt(s.details[f.name]) }}</dd> }
                 }
-                <dt i18n="@@side.externalId">External ID</dt><dd class="mono">{{ s.tenant?.external_id ?? '—' }}</dd>
+                @if (!connector()?.secret) {
+                  <dt i18n="@@side.externalId">External ID</dt><dd class="mono">{{ s.tenant?.external_id ?? '—' }}</dd>
+                }
                 <dt i18n="@@side.tenant">Tenant</dt><dd class="mono">{{ s.tenant?.name }}</dd>
               </dl>
             </section>
           }
         </aside>
 
+        <div class="main-col">
+        @if (role() === 'application_owner' && connector()?.secret) {
+          <app-secret-field [sessionId]="s.id" [status]="s.application_secret" [needed]="live.secretNeeded()"
+                            [open]="secretOpen()" [label]="connector()!.secret!.label" [help]="connector()!.secret!.help"
+                            [expiresHelp]="connector()!.secret!.expires_help" />
+        }
         <section class="conversations" aria-label="Conversations" i18n-aria-label="@@conv.aria">
           <header class="conv-head">
             <h2>{{ role() === 'iam_engineer' ? convTitle : yourConvTitle }}</h2>
@@ -124,13 +149,22 @@ const WIDE = '(min-width: 1101px)';
             }
           </header>
           @if (role() === 'iam_engineer') {
-            <div class="threads">
+            <div class="threads" [class.single]="ownerCollapsed()">
               <app-thread [thread]="role()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
                           [names]="names()" [viewerId]="meId()" [emptyText]="emptyText()" [dividerTimes]="dividerTimes()">
                 <ng-container *ngTemplateOutlet="composer" />
               </app-thread>
-              <app-thread [thread]="otherRole()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
-                          [names]="names()" [viewerId]="meId()" [emptyText]="otherEmptyText()" [dividerTimes]="dividerTimes()" />
+              @if (!ownerCollapsed()) {
+                <app-thread [thread]="otherRole()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
+                            [names]="names()" [viewerId]="meId()" [emptyText]="otherEmptyText()" [dividerTimes]="dividerTimes()" />
+              }
+              <!-- spec 002 R19: the owner's thread may be collapsed to a bar; side by side stays the default -->
+              <button type="button" class="other-bar" [attr.aria-pressed]="ownerCollapsed()" (click)="toggleOwnerThread()">
+                <svg viewBox="0 0 24 24" aria-hidden="true" [class.open]="!ownerCollapsed()"><path d="M9 6l6 6-6 6"></path></svg>
+                <b>{{ otherPairLabel() }}</b>
+                <span class="muted">· {{ names()[otherRole()] }} · {{ viewOnlyText }}@if (ownerCollapsed() && unseenOwner()) { · <span i18n="@@conv.newCount">{{ unseenOwner() }} new</span> }</span>
+                <span class="toggle">{{ ownerCollapsed() ? sideBySideText : collapseText }}</span>
+              </button>
             </div>
           } @else {
             <div class="threads single">
@@ -160,6 +194,7 @@ const WIDE = '(min-width: 1101px)';
             }
           </ng-template>
         </section>
+        </div>
       </div>
     } @else {
       <p class="muted page" i18n="@@loading">Loading…</p>
@@ -185,6 +220,38 @@ export class SessionScreenComponent implements OnInit {
   protected readonly readOnly = $localize`:@@tag.readOnly:read-only`;
   protected readonly change = $localize`:@@tag.change:change`;
 
+  protected readonly hasCapabilities = computed(() => !!this.connector()?.capabilities?.length);
+  protected readonly capabilities = computed(() => {
+    const caps = this.live.session()?.details?.['capabilities'];
+    return Array.isArray(caps) ? (caps as string[]) : [];
+  });
+  protected readonly writes = computed(() =>
+    (this.connector()?.capabilities ?? []).some((c) => c.tag === 'writes' && this.capabilities().includes(c.id)),
+  );
+  protected readonly readOnlyAccess = $localize`:@@side.accessValue:read-only (aggregation)`;
+  protected readonly readWrite = $localize`:@@side.accessWrite:read and write (provisioning)`;
+  /** The owner's secret field is open while the secret step is current or a new one is needed (research R16). */
+  protected readonly secretOpen = computed(() => {
+    const s = this.live.session();
+    const secret = s?.application_secret;
+    const step = s?.plan?.find((p) => p.id === 'provide_secret');
+    return (
+      this.live.secretNeeded() !== null ||
+      !secret ||
+      secret.state === 'missing' ||
+      !!secret.expires_soon ||
+      (!!step && step.state !== 'done' && step.state !== 'skipped' && secret.state !== 'received' &&
+        secret.state !== 'in_isc' && secret.state !== 'vault_deleted')
+    );
+  });
+  /** Spec 002 R19: the IAM engineer may collapse the owner's thread; remembered per browser, side by side by default. */
+  protected readonly ownerCollapsed = signal(false);
+  private readonly collapsedAt = signal(0);
+  protected readonly unseenOwner = computed(
+    () => this.live.ownerThread().filter((m) => (m.seq ?? 0) > this.collapsedAt() && m.speaker !== 'agent').length,
+  );
+  protected readonly sideBySideText = $localize`:@@conv.sideBySide:Show side by side`;
+  protected readonly collapseText = $localize`:@@conv.collapse:Collapse`;
   protected readonly ownerLabel = computed(() => this.connector()?.owner_label ?? $localize`:@@role.owner:Application owner`);
   protected readonly otherRole = computed<Role>(() => (this.role() === 'iam_engineer' ? 'application_owner' : 'iam_engineer'));
   protected readonly otherOnline = computed(() => this.live.online()[this.otherRole()]);
@@ -238,7 +305,9 @@ export class SessionScreenComponent implements OnInit {
   protected readonly composerHint = computed(() =>
     this.role() === 'iam_engineer'
       ? $localize`:@@composer.iamHint:Your order is the approval: the agent changes SailPoint right away and records it under SailPoint actions. Keys, tokens and passwords are masked before anyone sees them.`
-      : $localize`:@@composer.ownerHint:Access keys, secret keys and tokens are masked before anyone sees them. A screenshot that shows a secret is held and you're asked for a cropped one.`,
+      : this.connector()?.secret
+        ? $localize`:@@composer.ownerHintSecret:Client secrets and tokens are masked here. A screenshot that shows a secret Value is held. The secret goes in the secret field, never the chat.`
+        : $localize`:@@composer.ownerHint:Access keys, secret keys and tokens are masked before anyone sees them. A screenshot that shows a secret is held and you're asked for a cropped one.`,
   );
   protected readonly emptyText = computed(() =>
     this.role() === 'iam_engineer'
@@ -277,6 +346,7 @@ export class SessionScreenComponent implements OnInit {
       this.connector.set(catalog.find((c) => c.id === s?.connector_type) ?? null);
       const me = this.auth.me();
       if (me) this.syncOn.set(readSync(me.id));
+      if (me && this.role() === 'iam_engineer' && readFlag(`onboarding.ownerCollapsed.${me.id}`)) this.collapseOwner(true);
       // The screen must match the signed-in role (FR-003); the API enforces this too.
       if (me && me.role !== this.role()) {
         void this.router.navigate(['/sessions', this.id(), me.role === 'iam_engineer' ? 'iam' : 'owner']);
@@ -299,6 +369,17 @@ export class SessionScreenComponent implements OnInit {
     this.syncOn.set(on);
     const me = this.auth.me();
     if (me) writeSync(me.id, on);
+  }
+
+  protected toggleOwnerThread(): void {
+    this.collapseOwner(!this.ownerCollapsed());
+    const me = this.auth.me();
+    if (me) writeFlag(`onboarding.ownerCollapsed.${me.id}`, this.ownerCollapsed());
+  }
+
+  private collapseOwner(on: boolean): void {
+    this.ownerCollapsed.set(on);
+    if (on) this.collapsedAt.set(Math.max(0, ...this.live.ownerThread().map((m) => m.seq ?? 0)));
   }
 
   protected openAction(a: Action): void {
@@ -343,6 +424,22 @@ function readSync(userId: string): boolean {
 function writeSync(userId: string, on: boolean): void {
   try {
     localStorage.setItem(syncKey(userId), on ? 'on' : 'off');
+  } catch {
+    // storage blocked: the choice lasts for this page only
+  }
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === 'on';
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? 'on' : 'off');
   } catch {
     // storage blocked: the choice lasts for this page only
   }
