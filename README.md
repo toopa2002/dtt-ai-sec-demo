@@ -51,7 +51,7 @@ make images      # local registry + build gateway (patched, see below) and both 
 make up          # gateway in Entra mode, network policies, port-forward + ngrok
 make adapters    # operator deploys weather + hr-directory THROUGH the gateway API (device-code sign-in)
 make agent       # AgentCore runtime + Entra JWT authorizer; OBO secret straight into SSM
-make chat        # http://localhost:3000
+make chat        # http://localhost:3000/mcp/  (public: https://$NGROK_DOMAIN/mcp/)
 ```
 
 After a reboot: `make tunnel` (and `make chat`).
@@ -61,7 +61,7 @@ After a reboot: `make tunnel` (and `make chat`).
 1. `make demo` shows the gateway, the gateway-managed MCP pods and the direct-call matrix
    (no token → 401, weather-only on HR → 403, …); transcript in `out/demo-run.md`.
 2. `make verify` proves direct pod access is blocked and every MCP server is gateway-registered.
-3. Open http://localhost:3000 in a private window and sign in as each persona. The **traffic panel** on the right shows each hop live (chatbot → Entra → agent → gateway → MCP server, plus Bedrock); see the guide §5.4a. Ask:
+3. Open https://$NGROK_DOMAIN/mcp/ (or http://localhost:3000/mcp/) in a private window and sign in as each persona. The **traffic panel** on the right shows each hop live (chatbot → Entra → agent → gateway → MCP server, plus Bedrock); see the guide §5.4a. Ask:
    - "What's the weather in Bangkok, and who is Somchai's manager?"
    - "What's the weather where Somchai lives?" (HR tool, then weather tool)
 4. Live revocation: `python3 scripts/entra.py revoke <full-upn> gateway:mcp.hr.user`,
@@ -70,12 +70,70 @@ After a reboot: `make tunnel` (and `make chat`).
 5. HR access audit: `kubectl -n adapter logs hr-directory-0 | grep hr-audit` (the gateway forwards the
    authenticated user id; the adapter never sees the bearer token).
 
+## AgentCore Gateway mode
+
+The agent can reach the same MCP servers through **AWS Bedrock AgentCore Gateways** (one per MCP server) instead of
+calling the MCP Gateway directly; `TOOLS_VIA` in `.env` selects the route (`mcp-gateway` is the default). AWS (and governance tools such as SailPoint, which reads AgentCore gateways and their MCP
+targets) then see the agent's tools; the per-user security model is unchanged.
+
+```
+agent ──token #1──► AgentCore Gateway mcpdemo-gw-<name> (Entra JWT, aud = mcpdemo-agent-api)
+                      └─ on-behalf-of exchange (Entra credential provider) → token #2 (user roles)
+                         ──► MCP Gateway /adapters/<name>/mcp   (gate 3 unchanged)
+```
+
+```bash
+make agentcore-gw                         # credential provider, role, one gateway + MCP target per server
+TOOLS_VIA=agentcore-gateway make agent    # switch the agent; TOOLS_VIA=mcp-gateway make agent switches back
+```
+
+- Targets list tools at request time with the user's exchanged token; a server the user may not use answers with an
+  authorization error (the MCP Gateway's 403), which the agent reports as denied. One gateway per server keeps one
+  denial from hiding the other server (a gateway lists its targets one page each and stops at a refused one).
+- The traffic panel shows an "AgentCore Gateways" node in this mode (`toolsVia` in the chatbot's `config.json`).
+- **Bedrock Agent engine:** `make bedrock-agent` creates `mcpdemo-tools-agent`, a Bedrock Agent with one
+  *return-control* action group per MCP server (`weather-mcp`, `hr-directory-mcp`; functions = the MCP tools).
+  With `AGENT_ENGINE=bedrock-agent make agent`, mcpdemo_agent hands the model loop to it: the Bedrock Agent picks the
+  tools, hands each call back, and mcpdemo_agent runs it through the AgentCore Gateways with the user's token — no
+  Lambda, no token in Bedrock. Governance tools that read Bedrock Agent action groups (SailPoint's **Tools**) now see
+  the agent's tools. `AGENT_ENGINE=claude make agent` switches back.
+- **Inbound:** `make agentcore-gw` also puts an AgentCore Gateway in front of the agent itself (`mcpdemo-gw-agent`,
+  target `mcpdemo-agent`, no protocol type). With `AGENT_VIA=agentcore-gateway` in `.env`, the chatbot's proxy calls
+  `AGENT_GATEWAY_URL/invocations` instead of the runtime endpoint. The gateway checks the Entra token and passes it
+  through unchanged (`JWT_PASSTHROUGH`), so the runtime's authorizer and the agent's `azp`/role checks still apply;
+  SSE streaming works as before. The traffic panel then shows chatbot → AgentCore Gateway → agent.
+- `make destroy` (or `scripts/agentcore-gateway.sh --delete`) removes it. Details: guide §5.8.
+
+## Sharing the ngrok domain
+
+The demo uses only `/mcp` on `$NGROK_DOMAIN`, so another app can use the rest of the domain:
+
+| Public path | Goes to |
+|---|---|
+| `/mcp/` | chatbot dev server (`:3000`, Angular `baseHref` `/mcp/`) |
+| `/mcp/gw/...` | MCP Gateway (port-forward `:8000`, prefix stripped) — `GATEWAY_URL` and the AgentCore Gateway targets use this |
+| `/.well-known/oauth-protected-resource/mcp/gw/...` | the gateway's protected-resource metadata |
+| everything else | `NGROK_ROOT_UPSTREAM` (a local port in `.env`), or 404 when empty |
+
+ngrok's free plan can route by path but not rewrite paths, so `make tunnel` also runs a small nginx container,
+`mcpdemo-edge` (`deployment/edge-nginx.conf`, port 8090), that strips the prefixes and puts `/mcp/gw` back into the
+gateway's OAuth discovery URLs. Entra's chatbot redirect URIs are `https://$NGROK_DOMAIN/mcp/` and
+`http://localhost:3000/mcp/`.
+
 ## Gateway patch
 
 Upstream MCP Gateway uses Entra auth only in Production mode, which requires Cosmos DB; Development mode
 (local Redis) forces `X-Dev-*` header auth. `patches/0001-entra-auth-in-development.patch` adds
 `Authentication__UseEntra=true` so the local Redis setup authenticates with Entra. It is applied to a
 clean submodule at build time (`scripts/03-build-push.sh`); the submodule itself stays unmodified.
+
+## ISC Onboarding Agent
+
+A second app in this repo, under [`onboarding/`](onboarding/): an IAM engineer and an application owner onboard an
+application into SailPoint ISC in one shared chat, with a Claude Haiku agent on AgentCore doing the SailPoint side.
+Web, API and MongoDB run on the local cluster under `/onboarding/` on the same ngrok domain; the agent runs on
+AgentCore. Start with [`onboarding/README.md`](onboarding/README.md); deployment steps are in
+[docs/DEMO-GUIDE.md §8](docs/DEMO-GUIDE.md#8-isc-onboarding-agent).
 
 ## Cost
 

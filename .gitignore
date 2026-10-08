@@ -11,3 +11,18 @@ chatbot/.angular/
 chatbot/dist/
 agent/.bedrock_agentcore.yaml
 agent/.bedrock_agentcore/
+# onboarding (spec 001)
+onboarding/web/node_modules/
+onboarding/web/dist/
+onboarding/web/.angular/
+onboarding/web/test-results/
+onboarding/web/playwright-report/
+onboarding/**/.pytest_cache/
+onboarding/**/.ruff_cache/
+onboarding/**/.mypy_cache/
+onboarding/agent/.bedrock_agentcore*
+onboarding/deploy/**/*.secret.yaml
+*.secret.yaml
+.DS_Store
+# /brag video runs (rendered MP4s, screenshots, dev seed data); videos are published separately
+brag-output*/

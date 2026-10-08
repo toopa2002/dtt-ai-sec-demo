@@ -1,7 +1,7 @@
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 # Create non-root user
-RUN adduser --disabled-password --gecos '' --uid 1100 mcpuser
+RUN adduser -D -g '' -u 1100 mcpuser
 
 # Set working directory
 WORKDIR /app

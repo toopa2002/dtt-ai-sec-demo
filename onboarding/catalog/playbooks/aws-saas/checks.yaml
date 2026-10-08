@@ -1,0 +1,19 @@
+# Which ISC checks drive which session steps (contracts/connector-playbook.md).
+connection_check:
+  tool: peek_accounts          # POST /beta/sources/{id}/connector/peek-resource-objects — the real end-to-end check
+  object_type: account
+  max_count: 5
+  passes_when: at least one account object is returned
+  also_sets: application_ready # SailPoint reached AWS through the role: the application side is ready
+aggregation:
+  tool: start_aggregation      # POST /beta/sources/{id}/load-accounts (+ load-entitlements), then poll /beta/task-status
+  entitlements: true
+  passes_when: every task completes SUCCESS or WARNING
+test_connection:
+  tool: test_connection        # POST /beta/sources/{id}/connector/test-configuration
+  run_after: aggregation       # AWS SaaS Test Connection only reports SUCCESS after the first aggregation
+  passes_when: status contains SUCCESS
+  before_aggregation_hint: >-
+    "req.input is null" before the first aggregation says nothing about the configuration: run the connection
+    check and an aggregation first, then Test Connection again.
+order: [create_source, configure_source, peek_accounts, start_aggregation, test_connection]

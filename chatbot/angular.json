@@ -17,6 +17,7 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "src/main.ts",
+            "baseHref": "/mcp/",
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
@@ -65,7 +66,8 @@
           "defaultConfiguration": "development",
           "options": {
             "port": 3000,
-            "proxyConfig": "proxy.conf.js"
+            "proxyConfig": "proxy.conf.js",
+            "allowedHosts": ["localhost", ".ngrok-free.app"]
           }
         },
         "test": {

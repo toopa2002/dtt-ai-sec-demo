@@ -1,0 +1,45 @@
+# AWS SaaS source settings — ported from .claude/skills/sailpoint-isc-aws-connector/scripts/isc-source.sh (create,
+# configure) and references/isc-api.md. Field names verified on two live tenants (2026-10).
+connector_script: awssaas
+spec_id: 6e47875b-73f1-481d-a613-59d4deca0c6a   # GET /v3/connectors/awssaas -> .type; re-read if SailPoint changes it
+description: AWS SaaS source managed by the ISC Onboarding Agent
+
+# Sent only on POST /v3/sources. They cannot be added later (PATCH strips them): without spConnectorSpecId +
+# idnProxyType ISC creates no connector instance; without spConnectorSupportsCustomSchemas peek/aggregation fail with
+# "no schema provided for account list".
+creation_only:
+  idnProxyType: sp-connect
+  connectionType: direct
+  spConnectorSupportsCustomSchemas: true
+  templateApplication: AWS SaaS
+  EnableAccessKeys: true
+  EnableHTTPSCredentials: true
+  EnableSSHKeys: true
+  healthCheckTimeout: 60
+  assumeRoleDurationInSeconds: 3600
+  pageSize: 10
+
+field_map:
+  external_id: externalId
+
+# PATCH /v3/sources/{id} ops, in order. `from` = session detail; `value` = constant; `template` = rendered playbook value;
+# `enabled_if` = boolean from whether a detail is set; `when_set` = skip unless that detail is set.
+configure:
+  - { field: roleName, from: role_name }
+  - { field: managementAccountId, from: management_account_id }
+  - { field: region, from: region, default: ap-southeast-1 }
+  - { field: assumeRoleSessionName, value: SailPointISC }
+  - { field: cloudScope, from: accounts }
+  # Form-required: the UI won't save without it. AWS managed policy that lets IAM users change only their own password.
+  - { field: changePasswordPolicyARN, template: "arn:aws:iam::aws:policy/IAMUserChangePassword" }
+  - { field: enableDiscoverBedrockAgent, enabled_if: bedrock_regions }
+  - { field: AgentAwsRegion, from: bedrock_regions, when_set: bedrock_regions }
+  - { field: enableDiscoverBedrockAgentCore, enabled_if: agentcore_regions }
+  - { field: AgentCoreAwsRegion, from: agentcore_regions, when_set: agentcore_regions }
+
+# SailPoint principals that assume the role. Demo/partner tenants (*.identitynow-demo.com) assume from 706944607044
+# (confirmed in CloudTrail); production tenants from 874540850173.
+values:
+  sailpoint_principal_prod: arn:aws:iam::874540850173:role/ciem_universal
+  sailpoint_principal_demo: arn:aws:iam::706944607044:role/ciem_universal
+  stack_name: SailPoint-ISC-AWS

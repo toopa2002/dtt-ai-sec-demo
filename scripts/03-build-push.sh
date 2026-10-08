@@ -9,8 +9,10 @@ git -C "$GW" apply "$REPO_ROOT/patches/0001-entra-auth-in-development.patch"
 trap 'git -C "$GW" checkout -- .' EXIT
 
 step "Publishing gateway + tool router images"
-dotnet publish "$GW/dotnet/Microsoft.McpGateway.Service/src/Microsoft.McpGateway.Service.csproj" -c Release /p:PublishProfile=localhost_5000.pubxml /p:BuildPortal=false
-dotnet publish "$GW/dotnet/Microsoft.McpGateway.Tools/src/Microsoft.McpGateway.Tools.csproj" -c Release /p:PublishProfile=localhost_5000.pubxml
+dotnet publish "$GW/dotnet/Microsoft.McpGateway.Service/src/Microsoft.McpGateway.Service.csproj" -c Release /p:PublishProfile=localhost_5000.pubxml /p:BuildPortal=false \
+  /p:RuntimeIdentifier=linux-musl-x64 /p:ContainerFamily=alpine
+dotnet publish "$GW/dotnet/Microsoft.McpGateway.Tools/src/Microsoft.McpGateway.Tools.csproj" -c Release /p:PublishProfile=localhost_5000.pubxml \
+  /p:RuntimeIdentifier=linux-musl-x64 /p:ContainerFamily=alpine
 
 for s in weather-mcp hr-directory-mcp; do
   step "Building $s"

@@ -1,0 +1,58 @@
+# Session API, which also serves the web app's build under /onboarding/ (one container; research R2, R7).
+# One replica: the live-event broadcaster is in-process.
+# Secret onboarding-aws (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY of IAM user onboarding-api) is written by
+# onboarding/deploy/scripts/agent-deploy.sh; the ConfigMap's AGENT_RUNTIME_ARN by up.sh.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: onboarding-api
+  namespace: onboarding
+data:
+  MONGO_URI: mongodb://mongodb-0.mongodb.onboarding.svc.cluster.local:27017/?replicaSet=rs0
+  MONGO_DB: onboarding
+  AWS_REGION: ap-southeast-1
+  AGENT_RUNTIME_ARN: "__AGENT_RUNTIME_ARN__"
+  CATALOG_DIR: /app/catalog
+  COOKIE_SECURE: "true"
+  CREDENTIAL_STORE: agentcore-identity
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: onboarding-api
+  namespace: onboarding
+spec:
+  selector: { app: onboarding-api }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding-api
+  namespace: onboarding
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: onboarding-api } }
+  template:
+    metadata: { labels: { app: onboarding-api } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      containers:
+        - name: api
+          image: localhost:5000/onboarding-api:latest
+          imagePullPolicy: Always
+          ports: [{ containerPort: 8080, name: http }]
+          envFrom:
+            - configMapRef: { name: onboarding-api }
+            - secretRef: { name: onboarding-aws, optional: true }
+          readinessProbe:
+            httpGet: { path: /onboarding/api/healthz, port: 8080 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]

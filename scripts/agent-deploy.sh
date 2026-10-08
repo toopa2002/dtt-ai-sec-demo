@@ -15,13 +15,13 @@ if [[ -z "${BEDROCK_MODEL_ID:-}" ]]; then
   # Prefer the in-geography APAC profile, then global.
   BEDROCK_MODEL_ID=$(tr '\t' '\n' <<<"$profiles" | grep -m1 '^apac\.' || tr '\t' '\n' <<<"$profiles" | grep -m1 '^global\.' || true)
   [[ -n "$BEDROCK_MODEL_ID" ]] || die "no Claude Haiku 4.5 inference profile in $AWS_REGION; enable model access in the Bedrock console"
-  sed -i "/^BEDROCK_MODEL_ID=/d" "$REPO_ROOT/.env"; echo "BEDROCK_MODEL_ID=$BEDROCK_MODEL_ID" >>"$REPO_ROOT/.env"
+  set_env BEDROCK_MODEL_ID "$BEDROCK_MODEL_ID"
 fi
 ok "model: $BEDROCK_MODEL_ID"
 
 step "OBO client secret for mcpdemo-agent-api -> SSM $PARAM"
 if [[ "${1:-}" == --rotate ]] || ! aws ssm get-parameter --region "$AWS_REGION" --name "$PARAM" >/dev/null 2>&1; then
-  end=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)
+  end=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30d +%Y-%m-%dT%H:%M:%SZ)  # GNU or BSD date
   # The secret goes straight from Entra into SSM; it is never printed or written to disk.
   az ad app credential reset --id "$AGENT_API_CLIENT_ID" --append --display-name agentcore-obo --end-date "$end" \
     --query password -o tsv |
@@ -39,14 +39,28 @@ agentcore configure --non-interactive --name "$AGENT_NAME" --entrypoint agent.py
   --authorizer-config "$AUTHZ" --request-header-allowlist Authorization \
   --idle-timeout 300 --disable-memory --disable-otel
 
+# Route to the tools: mcp-gateway (direct, default) or agentcore-gateway (scripts/agentcore-gateway.sh first).
+TOOLS_VIA=${TOOLS_VIA:-mcp-gateway}
+[[ "$TOOLS_VIA" != agentcore-gateway ]] || need AGENTCORE_GATEWAY_URLS
+set_env TOOLS_VIA "$TOOLS_VIA"   # remembered for the next deploy and for the chatbot's traffic panel
+ok "tools via: $TOOLS_VIA"
+# Model loop: claude (default) or bedrock-agent (scripts/bedrock-agent.sh first).
+AGENT_ENGINE=${AGENT_ENGINE:-claude}
+[[ "$AGENT_ENGINE" != bedrock-agent ]] || need BEDROCK_AGENT_ID BEDROCK_AGENT_ALIAS_ID
+set_env AGENT_ENGINE "$AGENT_ENGINE"
+ok "engine: $AGENT_ENGINE"
+
 step "Deploying"
 # Bypass the local uv cache for the ARM64 cross-build (a corrupt cache entry yields "Invalid Wheel-Version").
 export UV_NO_CACHE=1
 agentcore deploy --agent "$AGENT_NAME" --auto-update-on-conflict \
   --env "AWS_REGION=$AWS_REGION" --env "BEDROCK_MODEL_ID=$BEDROCK_MODEL_ID" --env "TENANT_ID=$TENANT_ID" \
   --env "AGENT_API_CLIENT_ID=$AGENT_API_CLIENT_ID" --env "CHAT_CLIENT_ID=$CHAT_CLIENT_ID" \
-  --env "GATEWAY_API_CLIENT_ID=$GATEWAY_API_CLIENT_ID" --env "GATEWAY_URL=https://$NGROK_DOMAIN" \
-  --env "MCP_ADAPTERS=weather,hr-directory" --env "OBO_SECRET_PARAM=$PARAM"
+  --env "GATEWAY_API_CLIENT_ID=$GATEWAY_API_CLIENT_ID" --env "GATEWAY_URL=$GATEWAY_PUBLIC" \
+  --env "MCP_ADAPTERS=weather,hr-directory" --env "OBO_SECRET_PARAM=$PARAM" \
+  --env "TOOLS_VIA=$TOOLS_VIA" --env "AGENTCORE_GATEWAY_URLS=${AGENTCORE_GATEWAY_URLS:-}" \
+  --env "AGENT_ENGINE=$AGENT_ENGINE" --env "BEDROCK_AGENT_ID=${BEDROCK_AGENT_ID:-}" \
+  --env "BEDROCK_AGENT_ALIAS_ID=${BEDROCK_AGENT_ALIAS_ID:-}"
 
 step "Granting the execution role read access to the OBO secret"
 # Read from the toolkit's config file (the `agentcore status` box wraps long ARNs).
@@ -58,10 +72,12 @@ aws iam put-role-policy --role-name "${ROLE##*/}" --policy-name mcpdemo-obo-secr
 {"Version":"2012-10-17","Statement":[
  {"Effect":"Allow","Action":"ssm:GetParameter","Resource":"arn:aws:ssm:$AWS_REGION:$ACCOUNT:parameter$PARAM"},
  {"Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],
-  "Resource":["arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*","arn:aws:bedrock:*:$ACCOUNT:inference-profile/$BEDROCK_MODEL_ID"]}]}
+  "Resource":["arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*","arn:aws:bedrock:*:$ACCOUNT:inference-profile/$BEDROCK_MODEL_ID"]},
+ {"Effect":"Allow","Action":"bedrock:InvokeAgent",
+  "Resource":"arn:aws:bedrock:$AWS_REGION:$ACCOUNT:agent-alias/${BEDROCK_AGENT_ID:-none}/${BEDROCK_AGENT_ALIAS_ID:-none}"}]}
 JSON
 )"
-sed -i "/^AGENT_RUNTIME_ARN=/d" "$REPO_ROOT/.env"; echo "AGENT_RUNTIME_ARN=$ARN" >>"$REPO_ROOT/.env"
+set_env AGENT_RUNTIME_ARN "$ARN"
 
 step "Log retention: 1 day"
 for g in $(aws logs describe-log-groups --region "$AWS_REGION" --log-group-name-prefix /aws/bedrock-agentcore/runtimes/ \

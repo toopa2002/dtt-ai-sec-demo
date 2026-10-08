@@ -1,0 +1,111 @@
+# Connector catalog — shipped with each product release, read-only at run time (spec FR-028, FR-029).
+# Adding a type = a new entry + playbooks/<id>/ (contracts/connector-playbook.md). Planned types cannot start a session.
+version: 1
+types:
+  - id: aws-saas
+    name: AWS SaaS
+    status: available
+    description: >-
+      AWS IAM users, groups and policies across an AWS Organization, plus optional discovery of Amazon Bedrock agents
+      and Bedrock AgentCore agent runtimes as machine identities. Read-only access by default.
+    owner_label: AWS owner
+    application_label: AWS
+    first_step_label: AWS role ready
+    owner_asks: >-
+      Create a cross-account IAM role with SailPoint's trust, the tenant External ID and read-only policies; add
+      discovery permissions if chosen.
+    agent_configures: >-
+      AWS SaaS source: role, management account, accounts in scope, region, change-password policy, discovery
+      regions; then connection check, aggregation and Test Connection.
+    session_fields:
+      - { name: source_name, label: Source name, type: string, required: true }
+      - { name: source_owner, label: Source owner (ISC alias, email or id), type: string, required: true }
+      - { name: management_account_id, label: AWS management account, type: aws_account_id, required: true }
+      - { name: accounts, label: Accounts in scope, type: aws_account_id_list, required: true }
+      - { name: region, label: Region, type: region, required: true, default: ap-southeast-1 }
+      - { name: role_name, label: Role name, type: string, required: false, default: "SailPointISCRole-{tenant}" }
+      - { name: bedrock_regions, label: Bedrock agent discovery regions, type: region_list, required: false }
+      - { name: agentcore_regions, label: AgentCore agent discovery regions, type: region_list, required: false }
+    playbook: playbooks/aws-saas
+
+  - id: entra-id
+    name: Microsoft Entra ID
+    status: planned
+    description: Users, groups and app role assignments from a Microsoft Entra ID tenant.
+    owner_label: Entra administrator
+    application_label: Entra ID
+    owner_asks: Register an app with read permissions and grant admin consent.
+    agent_configures: "Entra ID source: tenant, app credentials, scope."
+    session_fields: []
+  - id: active-directory
+    name: Active Directory
+    status: planned
+    description: Users and groups from on-premises Active Directory through a virtual appliance.
+    owner_label: AD administrator
+    application_label: Active Directory
+    owner_asks: Create a service account and a connection the virtual appliance can reach.
+    agent_configures: "AD source: domain, service account, search scopes."
+    session_fields: []
+  - id: gcp
+    name: Google Cloud Platform
+    status: planned
+    description: Principals and IAM bindings across a Google Cloud organization.
+    owner_label: GCP owner
+    application_label: GCP
+    owner_asks: Create a service account with read roles.
+    agent_configures: "GCP source: project or organization, service account."
+    session_fields: []
+  - id: azure
+    name: Microsoft Azure (resources)
+    status: planned
+    description: Role assignments on Azure subscriptions and resources.
+    owner_label: Azure owner
+    application_label: Azure
+    owner_asks: Create an app registration with reader roles.
+    agent_configures: "Azure source: tenant, subscriptions."
+    session_fields: []
+  - id: okta
+    name: Okta
+    status: planned
+    description: Users, groups and application assignments from an Okta org.
+    owner_label: Okta administrator
+    application_label: Okta
+    owner_asks: Create a read-only API token.
+    agent_configures: "Okta source: org URL, token."
+    session_fields: []
+  - id: servicenow
+    name: ServiceNow
+    status: planned
+    description: Users, groups and roles from a ServiceNow instance.
+    owner_label: ServiceNow administrator
+    application_label: ServiceNow
+    owner_asks: Create an integration user with read roles.
+    agent_configures: "ServiceNow source: instance, user."
+    session_fields: []
+  - id: salesforce
+    name: Salesforce
+    status: planned
+    description: Users, profiles and permission sets from a Salesforce org.
+    owner_label: Salesforce administrator
+    application_label: Salesforce
+    owner_asks: Create an integration user or connected app.
+    agent_configures: "Salesforce source: org, credentials."
+    session_fields: []
+  - id: workday
+    name: Workday
+    status: planned
+    description: Workers and organizations from Workday as an authoritative source.
+    owner_label: Workday administrator
+    application_label: Workday
+    owner_asks: Create an integration system user.
+    agent_configures: "Workday source: tenant, user."
+    session_fields: []
+  - id: web-services
+    name: Web Services (generic REST)
+    status: planned
+    description: Any application with a REST API, through the generic Web Services connector.
+    owner_label: Application owner
+    application_label: the application
+    owner_asks: Provide an API account and endpoints.
+    agent_configures: "Web Services source: endpoints, auth."
+    session_fields: []

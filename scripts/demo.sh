@@ -30,4 +30,4 @@ for p in operator full weather-only; do
   done
 done
 echo
-step "4. Now open http://localhost:3000 and chat as each persona (see README)"
+step "4. Now open $CHAT_PUBLIC (or http://localhost:3000/mcp/) and chat as each persona (see README)"
