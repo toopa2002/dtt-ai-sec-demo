@@ -150,7 +150,8 @@ agent gave them. Tenant names are left out here (constitution).
 | Secret path (FR-120, FR-125) | CloudTrail: `CreateApiKeyCredentialProvider` (API user) 13:15:37 → `GetResourceApiKey` (agent runtime role) 13:20:04 → `DeleteApiKeyCredentialProvider` (API user) 13:20:42, right after Test Connection passed. The value appears in no message, action, event or log |
 | Proof (FR-133) | Connection check 5 accounts; Test Connection SUCCESS; 23 service-principal attributes added; entitlements 2,183; accounts 225, all on `/v2026` with delta off for the read and restored |
 | Counts (SC-104) | ISC 64 users + 161 service principals = Entra `az ad user list` 64 and `az ad sp list --filter "servicePrincipalType eq 'Application'"` 161 |
-| AI agents (FR-135) | `aggregate-agents` → 404 "endpoint is unavailable": reported as a tenant limitation with the ISC path; plan step blocked; the IAM engineer started it in ISC |
+| AI agents (FR-134, FR-135) | `aggregate-agents` → 404 "endpoint is unavailable": reported as a tenant limitation with the ISC path; plan step blocked. After the IAM engineer ran it in ISC and said "Done, I started it in ISC", `count_ai_agents` found **2 AI agents** (the 2 Foundry agents in the subscription) and the `azure:foundry` schedule was turned on |
+| Machine accounts | `set_machine_classification`: classification on (`CRITERIA`, managed identities + service principals Application/Legacy), 225 accounts processed, **161 machine accounts** (the service principals; managed identities are off on the source) |
 | Provisioning (FR-136) | The source's existing CREATE policy was kept, and correlation was set (email = userPrincipalName, then mail). Step 11 showed User Administrator. Nothing was written to the directory |
 | SC-101 times | Entra administrator, from the first question to the secret received: 8 min 24 s (including about 2 min spent on bug 1 below); target ≤ 15 min, 225 accounts |
 

@@ -491,7 +491,7 @@ skipped. Only the SP steps run, and `delete_session_source` is refused (quicksta
   - the v2026 note;
   - which commands are paid: the evals estimate and the real-tenant run at about $0.50–$1.
 - [X] T092 Run the full free suite: agent and API `uv run pytest`, `make onboarding-e2e`, `make onboarding-leak-scan`. Confirm T005 (AWS unchanged) is still green. Then run `run_evals.py --suite aws_saas_failures --estimate`, state the estimate, and run the AWS gate once only if its fingerprint changed (expected after T012, T040 and T053).
-- [ ] T093 Run quickstart §4 against a test Entra tenant and a test ISC tenant (opt-in, paid; state the estimate first), including provisioning (001 FR-028). Record the counts against `az ad user list` and `az ad sp list`, and the CloudTrail `GetResourceApiKey` and `DeleteApiKeyCredentialProvider` entries. Record the SC-101 times too: the administrator's time from first instruction to secret received (target ≤ 15 min), the session time from start to proof passed (target ≤ 30 min), and the account count (the target applies at ≤ 5,000). Write them in `specs/002-entra-saas-connector/quickstart.md` §4 as the observed result. Then clean up the test source, app registration and role assignments.
+- [X] T093 Run quickstart §4 against a test Entra tenant and a test ISC tenant (opt-in, paid; state the estimate first), including provisioning (001 FR-028). Record the counts against `az ad user list` and `az ad sp list`, and the CloudTrail `GetResourceApiKey` and `DeleteApiKeyCredentialProvider` entries. Record the SC-101 times too: the administrator's time from first instruction to secret received (target ≤ 15 min), the session time from start to proof passed (target ≤ 30 min), and the account count (the target applies at ≤ 5,000). Write them in `specs/002-entra-saas-connector/quickstart.md` §4 as the observed result. Then clean up the test source, app registration and role assignments.
 
 ---
 
@@ -526,9 +526,9 @@ Each increment keeps the AWS SaaS suites green (SC-106).
 
 ## Implementation notes (2026-10-08)
 
-Done: every task except **T093** (the real-tenant run). T093 is paid and needs a test Entra tenant and a test ISC
-tenant, so it waits for an explicit go-ahead. It also covers the live provisioning check that 001 FR-028 requires
-before release.
+Done: every task. T093, the real-tenant run, was done on 2026-10-08 with all four capabilities. Results and the bugs it
+found are in quickstart §4. The test source, the Entra app (soft-deleted, in the Entra recycle bin for 30 days), its
+Azure role assignments and the test accounts were removed afterwards.
 
 Where the code differs from the task text:
 - **Tests**:
