@@ -100,7 +100,10 @@ tools: [find_connector_sources, adopt_source, find_source, get_connector_form, g
         test_connection, start_aggregation, aggregate_datasets, set_dataset_schedule, set_provisioning_policy,
         set_correlation, delete_session_source]
 order: [create_source, configure_source, ensure_schema_attributes, peek_accounts, test_connection,
-        start_aggregation, aggregate_datasets, set_dataset_schedule]       # each only after the previous succeeded
+        start_aggregation, set_machine_classification, aggregate_datasets, set_dataset_schedule,
+        set_provisioning_policy, set_correlation]                          # each only after the previous succeeded
+classification:                              # Machine Account Classification (service principals capability)
+  service_principals: machine-classification-config   # assets/: enabled, CRITERIA, managed identities + SP types
 connection_check: { tool: peek_accounts, object_type: account, max_count: 5, also_sets: application_ready }
 test_connection: { tool: test_connection, run_after: connection_check }
 aggregation:

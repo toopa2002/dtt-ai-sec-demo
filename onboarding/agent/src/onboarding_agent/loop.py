@@ -158,6 +158,11 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "set_correlation": {"description": "Set how accounts are matched to identities.",
                         "input_schema": {"type": "object", "properties": {}},
                         "progress": "setting account matching in SailPoint…"},
+    "set_machine_classification": {"description": "Turn on Machine Account Classification (managed identities and "
+                                                  "service principals become machine accounts) and classify the "
+                                                  "accounts already aggregated.",
+                                   "input_schema": {"type": "object", "properties": {"process": {"type": "boolean"}}},
+                                   "progress": "turning on machine account classification in SailPoint…"},
     "lifecycle_review": {"description": "The prepared leaver (lifecycle-state) account actions to show the IAM engineer "
                                         "for review. Never applied by the agent.",
                          "input_schema": {"type": "object", "properties": {}}, "progress": None},

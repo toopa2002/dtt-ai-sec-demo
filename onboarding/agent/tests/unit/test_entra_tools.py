@@ -14,7 +14,7 @@ from onboarding_agent.isc.client import IscClient
 from onboarding_agent.isc.tools import IscTools
 
 BASE = "https://acme-demo.api.identitynow-demo.com"
-EXPERIMENTAL = ["/aggregate-agents$", "/datasets(/|$)", "^/v2026/machine-identities"]
+EXPERIMENTAL = playbooks.load("entra-id").settings["experimental_paths"]
 SID = "2c9180887a3b4c5d6e7f809112233445"
 OWNER = "a" * 32
 SECRET = "Xy78Q~abcdefghijklmnopqrstuvwxyz0123456"
@@ -413,3 +413,60 @@ async def test_adopt_then_extend_only_and_never_delete(isc, mock, emit) -> None:
     assert "manageAzureServicePrincipalAsAccount" in sent
     delete = mock.delete(f"/v2026/sources/{SID}")
     assert (await tools.delete_session_source())["deleted"] is False and not delete.called
+
+
+async def test_vault_failure_is_the_services_problem_not_the_secret(isc, mock, emit, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Live run 2026-10-08: a vault read failure must not send the administrator off to make a new secret (E12)."""
+    async def broken(provider: str, workload_name=None) -> str:  # type: ignore[no-untyped-def]
+        raise vault.VaultError("AgentCore Identity could not return the stored value (AccessDeniedException)")
+
+    monkeypatch.setattr(vault, "get_application_secret", broken)
+    patch = mock.patch(f"/v2026/sources/{SID}")
+    result = await tools_for(isc, entra_session(source={"id": SID, "name": "n"}), emit).configure_source()
+    assert result["configured"] is False and result["side"] == "onboarding service"
+    assert "Do not ask for a new secret" in result["instruction"] and not patch.called
+    from onboarding_agent.masking_lite import strip_tokens
+
+    assert "[masked]" not in strip_tokens(result["error"])
+
+
+async def test_counts_wait_for_the_index_to_settle(isc, mock, emit) -> None:  # type: ignore[no-untyped-def]
+    """Live run 2026-10-08: right after SUCCESS ISC counted 158 of 225 accounts; the count is read until it settles."""
+    _aggregation_mocks(mock)
+    totals = iter(["158", "201", "225", "225"])
+
+    def accounts(request):  # type: ignore[no-untyped-def]
+        if request.url.params.get("count") == "true":
+            return respx.MockResponse(200, json=[{}], headers={"X-Total-Count": next(totals)})
+        return respx.MockResponse(200, json=[])
+
+    mock.get("/v2026/accounts").mock(side_effect=accounts)
+    result = await tools_for(isc, entra_session(source={"id": SID, "name": "n"}), emit).start_aggregation()
+    assert result["accounts"]["accounts"] == 225
+
+
+async def test_machine_classification_enabled_with_the_ui_criteria(isc, mock, emit) -> None:  # type: ignore[no-untyped-def]
+    """Machine Account Classification as a UI-configured source has it (Enable + Customize classification)."""
+    put = mock.put(f"/v2026/sources/{SID}/machine-classification-config").respond(200, json={})
+    classify = mock.post(f"/v2026/sources/{SID}/classify").respond(200, json={"Accounts submitted for processing": 225})
+    session = entra_session(("directory", "service_principals"), source={"id": SID, "name": "n"})
+    result = await tools_for(isc, session, emit).set_machine_classification()
+    body = json.loads(put.calls.last.request.content)
+    assert result["ok"] and result["accounts_submitted"] == 225 and classify.called
+    assert body["enabled"] is True and body["classificationMethod"] == "CRITERIA" and "_notes" not in body
+    groups = body["criteria"]["children"]
+    assert body["criteria"]["operation"] == "OR" and len(groups) == 2
+    assert {c["value"] for c in groups[0]["children"]} == {"Microsoft.ManagedIdentity", "userAssignedIdentities",
+                                                           "systemAssignedIdentities"}
+    assert {(c["attribute"], c["value"]) for c in groups[1]["children"]} == {
+        ("spn_servicePrincipalType", "Application"), ("spn_servicePrincipalType", "Legacy")}
+    # GA in the spec, but the live tenant requires the experimental header (2026-10-08)
+    assert put.calls.last.request.headers["X-SailPoint-Experimental"] == "true"
+    assert classify.calls.last.request.headers["X-SailPoint-Experimental"] == "true"
+    assert emit.final_actions()[-1]["summary"] == "machine accounts: classification on · 225 submitted"
+
+
+async def test_machine_classification_needs_service_principals(isc, mock, emit) -> None:  # type: ignore[no-untyped-def]
+    put = mock.put(f"/v2026/sources/{SID}/machine-classification-config")
+    result = await tools_for(isc, entra_session(source={"id": SID, "name": "n"}), emit).set_machine_classification()
+    assert result["skipped"] and not put.called

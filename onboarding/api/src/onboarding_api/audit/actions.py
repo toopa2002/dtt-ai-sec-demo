@@ -12,7 +12,7 @@ ACTIONS = ("create_source", "configure_source", "connection_check", "aggregate",
            # spec 002 (Entra)
            "aggregate_entitlements", "aggregate_accounts", "aggregate_datasets", "adopt_source",
            "ensure_schema_attributes", "set_dataset_schedule", "set_provisioning_policy", "set_correlation",
-           "apply_application_secret")
+           "apply_application_secret", "set_machine_classification")
 CHECKS = ("connection_check", "aggregate", "test_connection", "aggregate_entitlements", "aggregate_accounts",
           "aggregate_datasets")
 TRIGGERS = ("order", "application_owner_confirmation", "followup", "secret_submitted")
@@ -25,7 +25,8 @@ OUTCOME = {"create_source": "created", "configure_source": "configured", "connec
            "aggregate": "completed", "test_connection": "passed", "delete_source": "deleted",
            "aggregate_entitlements": "completed", "aggregate_accounts": "completed", "aggregate_datasets": "completed",
            "adopt_source": "bound", "ensure_schema_attributes": "updated", "set_dataset_schedule": "updated",
-           "set_provisioning_policy": "updated", "set_correlation": "updated", "apply_application_secret": "applied"}
+           "set_provisioning_policy": "updated", "set_correlation": "updated", "apply_application_secret": "applied",
+           "set_machine_classification": "enabled"}
 DIAGNOSIS_MAX = 1000
 
 

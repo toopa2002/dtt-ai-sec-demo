@@ -22,6 +22,7 @@ steps:
   - {id: test_connection, title: Test Connection, actor: agent, kind: read_only, milestone: test_connection}
   - {id: aggregate_entitlements, title: Aggregate entitlements, actor: agent, kind: read_only, milestone: aggregation}
   - {id: aggregate_accounts, title: Aggregate accounts (full read), actor: agent, kind: read_only, milestone: aggregation}
+  - {id: machine_classification, title: Turn on machine account classification, actor: agent, kind: change, capability: service_principals}
   - {id: aggregate_foundry, title: Aggregate Foundry agents, actor: agent, kind: read_only, capability: ai_agents}
   - {id: foundry_schedule, title: Turn on the Foundry schedule, actor: agent, kind: change, capability: ai_agents}
   - {id: provisioning_policy, title: Set the account-creation policy and matching rule, actor: agent, kind: change, capability: provisioning}

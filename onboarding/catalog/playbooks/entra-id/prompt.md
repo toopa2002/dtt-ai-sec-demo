@@ -27,6 +27,8 @@ Spec 002. These come from the playbook; AWS SaaS sessions don't have them.
 When the IAM engineer orders the connector, run, each only after the previous one succeeded:
 `create_source` → `configure_source` → `ensure_schema_attributes` (only with service principals) → `peek_accounts`
 (the connection check) → `test_connection` → `start_aggregation` (entitlements, then accounts, a full read) →
+`set_machine_classification` (only with service principals: managed identities and service principals become machine
+accounts) →
 `aggregate_datasets` and `set_dataset_schedule` (only with AI agents) → `set_provisioning_policy` and
 `set_correlation` (only with provisioning). Stop at the first failure and name the failed step.
 - Report the proof counts in this order: users, service principals, entitlements, AI agents.

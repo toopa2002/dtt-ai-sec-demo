@@ -72,6 +72,7 @@ async def test_full_entra_proof_against_the_stub(stub) -> None:  # type: ignore[
     agg = await tools.start_aggregation()
     assert agg["ok"] and agg["entitlements"]["entitlements"] == 412
     assert agg["accounts"]["users"] == 64 and agg["accounts"]["service_principals"] == 161
+    assert (await tools.set_machine_classification())["accounts_submitted"] == 225
     assert (await tools.aggregate_datasets())["ai_agents"] == 2
     assert (await tools.set_dataset_schedule())["schedule"] == "on"
     assert (await tools.set_provisioning_policy())["kept_existing"] is False
@@ -83,6 +84,7 @@ async def test_full_entra_proof_against_the_stub(stub) -> None:  # type: ignore[
     assert [p for p in state["entra"]["patches"] if "clientSecret" in p] == [state["entra"]["patches"][0]]
     assert state["entra"]["datasets"][source["id"]]["azure:foundry"]["aggregationEnabled"] is True
     assert state["entra"]["account_creates"] == 0
+    assert state["entra"]["classification"][source["id"]]["classificationMethod"] == "CRITERIA"
     assert all(c.split()[1].startswith("/v2026/") for c in state["calls"])
     assert SECRET not in repr(events)
 

@@ -22,6 +22,10 @@ from .client import IscError
 
 COUNT_SCAN_LIMIT = 10_000   # accounts read to count service principals apart from users (250 per page)
 PAGE = 250
+# ISC's account index lags the aggregation task: right after SUCCESS a live run counted 158 of 225 accounts
+# (2026-10-08). Counts are read until two reads agree, up to SETTLE_READS reads SETTLE_SECONDS apart.
+SETTLE_READS = 9
+SETTLE_SECONDS = 10.0
 
 
 def _q(filter_expr: str) -> str:
@@ -82,7 +86,7 @@ class PlaybookToolsMixin:
         secret = self._secret()
         if not fields or secret.get("state") != "received":
             return [], {}
-        value = await vault.get_application_secret(secret.get("provider", ""))
+        value = await vault.get_application_secret(secret.get("provider", ""), getattr(self, "workload_name", None))
         ops = [{"op": "add", "path": f"/connectorAttributes/{field}", "value": value} for field in fields]
         return ops, {field: "[vaulted]" for field in fields}
 
@@ -179,10 +183,22 @@ class PlaybookToolsMixin:
                                           [{"op": "add", "path": f"/connectorAttributes/{field}", "value": True}])
 
     # ------------------------------------------------------------------ counts
+    async def _settled_count(self, path: str, flt: str) -> int:
+        """A count that has stopped changing (the index catches up after the task ends)."""
+        wait = getattr(self, "settle_seconds", SETTLE_SECONDS)
+        last = await self.isc.count(path, flt)
+        for _ in range(SETTLE_READS - 1):
+            await asyncio.sleep(wait)
+            now = await self.isc.count(path, flt)
+            if now == last and now > 0:
+                return now
+            last = now
+        return last
+
     async def _count_accounts(self, sid_raw: str) -> dict[str, int | None]:
         field = self.paths.account_source_field
         flt = f'{field} eq "{sid_raw}"'
-        total = await self.isc.count(self.paths("accounts"), flt)
+        total = await self._settled_count(self.paths("accounts"), flt)
         counts: dict[str, int | None] = {"accounts": total}
         schema = (self.pb.checks.get("schema") or {}).get("service_principals") or {}
         attr = schema.get("type_attribute")
@@ -202,7 +218,7 @@ class PlaybookToolsMixin:
         return counts
 
     async def _count_entitlements(self, sid_raw: str) -> int:
-        return await self.isc.count(self.paths("entitlements"), f'source.id eq "{sid_raw}"')
+        return await self._settled_count(self.paths("entitlements"), f'source.id eq "{sid_raw}"')
 
     # ------------------------------------------------------------------ aggregation sequence (Entra: entitlements, accounts)
     async def _wait_limited(self, task_id: str, seconds: float) -> dict:
@@ -338,6 +354,42 @@ class PlaybookToolsMixin:
         await self._action("ensure_schema_attributes", "ok", request={"capability": capability, "added": added},
                            started=started, summary=f"{len(added)} attributes added")
         return {"ok": True, "added": added, "already_present": len(wanted) - len(added)}
+
+    # ------------------------------------------------------------------ machine account classification
+    async def set_machine_classification(self, process: bool = True) -> dict:
+        """Turn on Machine Account Classification with the playbook's criteria (UI: Machine Accounts → Classification →
+        Enable + Customize classification), then classify the accounts already aggregated (UI: Process
+        Classification). Only with the capability whose `checks.classification` entry names the criteria."""
+        cfg = self.pb.checks.get("classification") or {}
+        capability = next((c for c in cfg if c in self._capabilities()), None)
+        if not capability:
+            return {"ok": True, "skipped": "machine account classification isn't part of the chosen capabilities"}
+        source = self.session.get("source")
+        if not source:
+            return {"ok": False, "error": "no source has been created in this session yet"}
+        sid = quote(source["id"])
+        await self._plan("machine_classification", "in_progress")
+        started = self._begin()
+        body = self.pb.asset(cfg[capability])
+        request = {"enabled": body.get("enabled"), "classificationMethod": body.get("classificationMethod"),
+                   "criteria": body.get("criteria"), "process": process}
+        try:
+            await self.isc.request("PUT", self.paths("classification_config", sid=sid), json=body)
+            submitted = None
+            if process:
+                result = await self.isc.post(self.paths("classify", sid=sid))
+                if isinstance(result, dict):
+                    submitted = next((v for v in result.values() if isinstance(v, int)), None)
+        except IscError as exc:
+            await self._plan("machine_classification", "failed", str(exc)[:150])
+            await self._action("set_machine_classification", "failed", error=str(exc), request=request,
+                               started=started)
+            return {"ok": False, "error": str(exc)}
+        await self._plan("machine_classification", "done")
+        summary = "machine accounts: classification on" + (f" · {submitted} submitted" if submitted is not None else "")
+        await self._action("set_machine_classification", "ok", request=request, started=started, summary=summary)
+        return {"ok": True, "enabled": True, "method": body.get("classificationMethod"),
+                "accounts_submitted": submitted}
 
     # ------------------------------------------------------------------ datasets (AI agents)
     async def aggregate_datasets(self) -> dict:

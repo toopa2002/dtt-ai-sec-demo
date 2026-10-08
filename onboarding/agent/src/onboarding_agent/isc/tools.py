@@ -24,7 +24,8 @@ WRITE_TOOLS = {"create_source", "configure_source", "peek_accounts", "start_aggr
                "delete_session_source",
                # spec 002 (Entra): generic, offered only to playbooks that list them in checks.yaml `tools`
                "adopt_source", "ensure_schema_attributes", "aggregate_datasets", "set_dataset_schedule",
-               "set_provisioning_policy", "set_correlation", "apply_application_secret", "count_ai_agents"}
+               "set_provisioning_policy", "set_correlation", "apply_application_secret", "count_ai_agents",
+               "set_machine_classification"}
 
 
 OWNER_RETRY_SECONDS = 2.0
@@ -41,6 +42,8 @@ class IscTools(PlaybookToolsMixin):
         self.isc = client
         self.pb = playbook
         self.paths = paths.for_playbook(playbook.settings)
+        self.workload_name: str | None = None  # set by main from the turn payload (vault reads, spec 002)
+        self.settle_seconds = poll_seconds  # spec 002: wait between count reads while ISC's index catches up
         self.session = session
         self.emit = emit
         self.poll_seconds = poll_seconds
@@ -247,7 +250,16 @@ class IscTools(PlaybookToolsMixin):
             ops = [{"op": "add", "path": f"/connectorAttributes/{k}", "value": v} for k, v in values.items()]
             secret_ops, shown = await self._secret_ops()
             await self.isc.patch_json(self.paths("source", sid=quote(source["id"])), ops + secret_ops)
-        except (IscError, ValueError, vault.VaultError) as exc:
+        except vault.VaultError as exc:
+            # The onboarding service couldn't read its own vault: not the administrator's secret (spec 002 E12).
+            await self._step("configured", "failed")
+            await self._action("configure_source", "failed", error=f"vault read failed: {exc}",
+                               request={"fields": values}, started=started)
+            return {"configured": False, "error": f"vault read failed: {exc}", "side": "onboarding service",
+                    "instruction": "This is a problem of the onboarding service's own vault, not of the secret the "
+                                   "Entra administrator provided. Do not ask for a new secret. Tell the IAM engineer "
+                                   "the service could not read its vault and that it needs an operator."}
+        except (IscError, ValueError) as exc:
             await self._step("configured", "failed")
             await self._action("configure_source", "failed", error=str(exc), request={"fields": values},
                                started=started)

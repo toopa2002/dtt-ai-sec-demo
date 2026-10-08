@@ -5,13 +5,14 @@
 # The ISC tools offered to the model for this type (the role gate still applies).
 tools: [check_tenant_features, find_connector_sources, adopt_source, find_source, get_connector_form, get_task,
         read_source_setup, create_source, configure_source, apply_application_secret, ensure_schema_attributes,
-        peek_accounts, test_connection, start_aggregation, aggregate_datasets, count_ai_agents,
+        peek_accounts, test_connection, start_aggregation, set_machine_classification, aggregate_datasets,
+        count_ai_agents,
         set_dataset_schedule, set_provisioning_policy, set_correlation, lifecycle_review, delete_session_source,
         request_new_secret, record_application_id]
 
 # Each runs only after the previous one succeeded. Tools for capabilities not chosen are skipped.
 order: [create_source, configure_source, ensure_schema_attributes, peek_accounts, test_connection, start_aggregation,
-        aggregate_datasets, set_dataset_schedule, set_provisioning_policy, set_correlation]
+        set_machine_classification, aggregate_datasets, set_dataset_schedule, set_provisioning_policy, set_correlation]
 
 connection_check:
   tool: peek_accounts          # POST /v2026/sources/{id}/connector/peek-resource-objects, delta switched off
@@ -34,6 +35,12 @@ schema:
   service_principals:
     asset: account-schema-spn-attributes
     type_attribute: spn_servicePrincipalType   # set on service-principal accounts only: counts them apart from users
+
+# Machine Account Classification (UI: Machine Accounts → Classification): managed identities and service principals
+# become machine accounts. PUT …/machine-classification-config, then POST …/classify for the accounts already there.
+# From the skill's assets/isc/machine-classification-config.json.
+classification:
+  service_principals: machine-classification-config
 
 datasets:
   ai_agents:

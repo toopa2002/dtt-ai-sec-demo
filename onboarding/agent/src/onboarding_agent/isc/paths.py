@@ -47,6 +47,8 @@ LEGACY = Paths(
         "dataset": "/beta/sources/{sid}/datasets/{dataset_id}",
         "aggregate_agents": "/beta/sources/{sid}/aggregate-agents",
         "machine_identities": "/beta/machine-identities",
+        "classification_config": "/beta/sources/{sid}/machine-classification-config",
+        "classify": "/beta/sources/{sid}/classify",
     },
     account_source_field="sourceId",
     multipart_aggregation=False,
@@ -78,6 +80,9 @@ V2026 = Paths(
         "dataset": "/v2026/sources/{sid}/datasets/{dataset_id}",
         "aggregate_agents": "/v2026/sources/{sid}/aggregate-agents",
         "machine_identities": "/v2026/machine-identities",
+        # GA in the published spec, but a live tenant demands the experimental header (playbook experimental_paths)
+        "classification_config": "/v2026/sources/{sid}/machine-classification-config",
+        "classify": "/v2026/sources/{sid}/classify",  # "Process Classification"
     },
     # v2026 /accounts rejects `sourceId` (HTTP 400, seen live) although its spec text still shows it.
     account_source_field="source.id",

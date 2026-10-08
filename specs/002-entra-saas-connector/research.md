@@ -127,6 +127,7 @@ Phase 0 decisions. Numbering is local to this feature (R1–R14). References lik
     | `set_provisioning_policy(replace=false)` | write | `assets/provisioning-policy-create.json` rendered with `upn_domain`, `usage_location`; keeps an existing CREATE policy unless `replace` (FR-136) |
     | `set_correlation` | write | `assets/correlation-config.json` |
     | `apply_application_secret` | write | R2 |
+    | `set_machine_classification(process=true)` | write | `checks.classification[capability]` → `assets/machine-classification-config.json`: `PUT /v2026/sources/{id}/machine-classification-config` (`enabled`, `classificationMethod: CRITERIA`, managed-identity and service-principal criteria), then `POST /v2026/sources/{id}/classify`; both GA (added 2026-10-08, matching a UI-configured source's Machine Accounts → Classification) |
 
   - `start_aggregation` reads `checks.aggregation.sequence` (default `[accounts, entitlements]` together, as today;
     Entra uses `[entitlements, accounts]` in sequence) and `settings.full_read: {field: deltaAggregationEnabled}`.

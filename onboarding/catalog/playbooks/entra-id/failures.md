@@ -100,6 +100,15 @@ step to confirm, the fix, and whether to retry once. Read error codes literally;
 - Fix: offer to switch it off (as E9). Copilot Studio is out of scope for this flow.
 - Retry once: no.
 
+## E12 — The onboarding service could not read its vault
+- Signature: a tool error starting `vault read failed:` (the source exists, configure stops before calling SailPoint).
+- Side: the onboarding service itself, not Entra and not the administrator.
+- Cause: the service's own AgentCore Identity access (deployment or permissions).
+- Confirm: nothing for the participants to run.
+- Fix: tell the IAM engineer the service needs an operator. **Do not** ask for a new secret: the administrator's secret
+  was never tried. Once fixed, configure again; the stored secret is still waiting in the vault.
+- Retry once: no.
+
 ## E11 — Dataset aggregation not available to automation
 - Signature: `aggregate-agents` returns 404 "The aggregate-agents endpoint is unavailable".
 - Side: sailpoint (tenant limitation, not a setup error).

@@ -62,6 +62,7 @@ async def _run_turn(payload: dict, emit) -> None:  # type: ignore[no-untyped-def
         thread = payload.get("message", {}).get("thread") or role
         tools = IscTools(isc, pb, session, emit,
                          trigger="order" if role == "iam_engineer" else "application_owner_confirmation")
+        tools.workload_name = payload.get("workload_name")  # spec 002: the vault read uses the same workload token
         await loop.run_turn(payload, pb, tools, SessionTools(emit, thread), emit, claude=MODEL)
     finally:
         await isc.close()
@@ -99,10 +100,21 @@ async def _task_counts(isc: IscClient, table, want: dict, tasks: list[dict]) -> 
         return {}
     flt = f'{table.account_source_field} eq "{sid}"'
     out: dict = {}
+
+    async def settled(path: str, f: str) -> int:  # ISC's index lags the task (see playbook_tools SETTLE_*)
+        last = await isc.count(path, f)
+        for _ in range(8):
+            await asyncio.sleep(10)
+            now = await isc.count(path, f)
+            if now == last and now > 0:
+                return now
+            last = now
+        return last
+
     if want.get("entitlements"):
-        out["entitlements"] = await isc.count(table("entitlements"), f'source.id eq "{sid}"')
+        out["entitlements"] = await settled(table("entitlements"), f'source.id eq "{sid}"')
     if want.get("accounts"):
-        total = await isc.count(table("accounts"), flt)
+        total = await settled(table("accounts"), flt)
         out["accounts"] = total
         attr = want.get("sp_attribute")
         if attr and total <= 10_000:

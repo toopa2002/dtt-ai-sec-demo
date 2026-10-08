@@ -95,6 +95,7 @@ rules:
 
   - when: {connector: Microsoft Entra ID, min_round: 1, last: '"entitlements": \{'}
     then:
+      - {tool: set_machine_classification}
       - {tool: aggregate_datasets}
       - {tool: set_dataset_schedule}
       - {tool: set_provisioning_policy}

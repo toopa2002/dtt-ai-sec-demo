@@ -110,7 +110,7 @@ aws iam put-user-policy --user-name "$ONB_API_USER" --policy-name onboarding-api
  {"Effect":"Allow","Action":["bedrock-agentcore:CreateApiKeyCredentialProvider","bedrock-agentcore:UpdateApiKeyCredentialProvider",
    "bedrock-agentcore:DeleteApiKeyCredentialProvider","bedrock-agentcore:GetApiKeyCredentialProvider"],
   "Resource":["arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default",
-              "arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default/apikeycredentialprovider/onboarding-entra-*"]},
+              "arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default/apikeycredentialprovider/*"]},
  {"Effect":"Allow","Action":["bedrock-agentcore:CreateTokenVault","bedrock-agentcore:GetTokenVault"],
   "Resource":"arn:aws:bedrock-agentcore:$AWS_REGION:$ACCOUNT:token-vault/default"},
  {"Effect":"Allow","Action":["secretsmanager:CreateSecret","secretsmanager:PutSecretValue","secretsmanager:DeleteSecret",

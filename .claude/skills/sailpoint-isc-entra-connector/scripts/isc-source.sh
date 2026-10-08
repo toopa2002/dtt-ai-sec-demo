@@ -46,6 +46,11 @@ Usage: isc-source.sh <subcommand> [options] [--apply | --plan-only]
             the published v2026 spec, so treat it as undocumented (the schedule frequency is ISC's default).
   schema-spn --source ID|NAME   Add the service-principal attributes (assets/isc/account-schema-spn-attributes.json)
             to the account schema; configure runs it for the machine-identity profile.
+  classification --source ID|NAME [--process] [--off]
+            Machine Account Classification (assets/isc/machine-classification-config.json): enable it with the
+            managed-identity and service-principal criteria (UI "Customize classification"); --process also classifies
+            the accounts already aggregated (UI "Process Classification"); --off disables it. configure runs it for
+            the machine-identity profile, and verify processes it after account aggregation when it is enabled.
   provisioning-policy --source ID|NAME --upn-domain D [--usage-location "United States;US"] [--replace]
             Create (or with --replace, overwrite) the CREATE provisioning policy for joiners.
   correlation --source ID|NAME        Set account correlation from assets/isc/correlation-config.tmpl.json.
@@ -64,6 +69,7 @@ CONNECTOR="" FROM_SOURCE="" NAME="" OWNER="" DESCRIPTION="Microsoft Entra source
 SOURCE="" FROM_SETUP="" DOMAIN="" CLIENT_ID="" SECRET_FILE="" GRANT_TYPE="" PROFILES="" EXO_PFX="" EXO_PASS=""
 WAIT=1 CRON="" SCHED_TYPES="account,group" CLEAR=0 KEYMAP="" REUSE=0 OFFLINE=0
 ONLY="entitlement,account,dataset" DATASETS="" SCHED_ON="" FULL=0 UPN_DOMAIN="" USAGE_LOCATION="United States;US" REPLACE=0
+PROCESS=0
 while (($#)); do
   case "$1" in
     --connector) CONNECTOR="$2"; shift ;;
@@ -90,6 +96,7 @@ while (($#)); do
     --off) SCHED_ON=false ;;
     --usage-location) USAGE_LOCATION="$2"; shift ;;
     --replace) REPLACE=1 ;;
+    --process) PROCESS=1 ;;
     --no-wait) WAIT=0 ;;
     --full) FULL=1 ;;
     --cron) CRON="$2"; shift ;;
@@ -142,7 +149,7 @@ token() {
 API=/v2026
 # Only experimental endpoints get the experimental header; everything else used here is GA in v2026.
 # (sources/{id}/datasets[/{datasetId}] is not in the published v2026 spec; only `datasets` and `dataset-schedule` use it.)
-EXPERIMENTAL_RE='/aggregate-agents$|/datasets$|/datasets/|/machine-identities\?'
+EXPERIMENTAL_RE='/aggregate-agents$|/datasets$|/datasets/|/machine-identities\?|/machine-classification-config$|/classify$'
 
 # api METHOD PATH [BODY] [CONTENT_TYPE] — prints the response body. Writes are skipped in dry-run.
 # CONTENT_TYPE multipart/form-data takes BODY as k=v&k=v and sends each pair as a form field.
@@ -406,7 +413,7 @@ cmd_configure() {
   api PATCH "$API/sources/$id" "$ops" application/json-patch+json >/dev/null
   if (( APPLY )); then ok "source updated"; else warn "dry-run only; rerun with --apply"; fi
   # The UI extends the account schema when service principals are switched on; the API doesn't, so do it here.
-  [[ ",$PROFILES," == *",machine-identity,"* ]] && cmd_schema_spn "$id"
+  [[ ",$PROFILES," == *",machine-identity,"* ]] && { cmd_schema_spn "$id"; cmd_classification "$id"; }
   (( APPLY )) && warn "settings changed: run verify (or aggregate --full) so the next account aggregation reads everything now in scope"
   if [[ ",$PROFILES," == *",ai-agents,"* ]]; then
     warn "ai-agents turns on Copilot Studio agents too: the microsoft:copilot dataset only works once the app is an application user in each Power Platform environment (references/entra-permissions.md). Agent 365 stays off (needs a user refresh token)."
@@ -545,6 +552,11 @@ cmd_verify() {
   cmd_test
   FULL=1   # the proof needs the full set, not just changes since the last delta run
   cmd_aggregate || die "aggregation reported a failure — check the task messages above"
+  # Machine accounts aggregated before classification was enabled are classified only when it is processed.
+  if [[ ",$ONLY," == *",account,"* ]] && (( ! OFFLINE )) \
+     && [[ "$(api GET "$API/sources/$(source_id "$SOURCE")/machine-classification-config" | jq -r '.enabled // false')" == true ]]; then
+    PROCESS=1 SCHED_ON=true cmd_classify_process "$(source_id "$SOURCE")"
+  fi
   (( APPLY )) && ok "verified: peek, test and aggregation all succeeded"
   return 0
 }
@@ -597,6 +609,29 @@ cmd_schema_spn() {
   echo "  adding $n attribute(s): $(jq -r '[.[].value.name] | join(", ")' <<<"$ops")" >&2
   api PATCH "$API/sources/$id/schemas/$(jq -r .id <<<"$acct")" "$ops" application/json-patch+json >/dev/null
   if (( APPLY )); then ok "account schema updated (+$n)"; else warn "dry-run only; rerun with --apply"; fi
+}
+
+cmd_classification() {
+  local id="${1:-}"; [[ -n "$id" ]] || id="$(source_id "$SOURCE")"
+  step "Machine account classification ($id)"
+  local body
+  if [[ "$SCHED_ON" == false ]]; then
+    body="$(api GET "$API/sources/$id/machine-classification-config" | jq -c '{enabled: false, classificationMethod, criteria}')"
+  else
+    body="$(jq -c 'with_entries(select(.key | startswith("_") | not))' "$ASSETS/isc/machine-classification-config.json")"
+  fi
+  api PUT "$API/sources/$id/machine-classification-config" "$body" >/dev/null
+  if (( APPLY )); then
+    ok "classification $( [[ "$SCHED_ON" == false ]] && echo disabled || echo 'enabled: managed identities, service principals (Application, Legacy)')"
+  else warn "dry-run only; rerun with --apply"; fi
+  (( PROCESS )) && [[ "$SCHED_ON" != false ]] && cmd_classify_process "$id"
+  return 0
+}
+
+cmd_classify_process() {  # UI "Process Classification": classify the accounts already on the source
+  local id="$1"
+  local r; r="$(api POST "$API/sources/$id/classify")"
+  if (( APPLY )); then ok "classification processed: $(jq -c . <<<"$r")"; fi
 }
 
 cmd_provisioning_policy() {
@@ -675,6 +710,7 @@ case "$CMD" in
   datasets) cmd_datasets ;;
   dataset-schedule) cmd_dataset_schedule ;;
   schema-spn) cmd_schema_spn ;;
+  classification) cmd_classification ;;
   provisioning-policy) cmd_provisioning_policy ;;
   correlation) cmd_correlation ;;
   schedule) cmd_schedule ;;

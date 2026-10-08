@@ -235,6 +235,7 @@ export function actionLabel(a: string): string {
       set_provisioning_policy: $localize`:@@action.policy:Account-creation policy`,
       set_correlation: $localize`:@@action.correlation:Account matching`,
       apply_application_secret: $localize`:@@action.secret:Applied new secret`,
+      set_machine_classification: $localize`:@@action.classification:Machine account classification`,
     }[a] ?? a
   );
 }

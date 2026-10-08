@@ -35,13 +35,13 @@ async def _workload_token(workload_name: str | None) -> str:
 
 async def get_application_secret(provider: str, workload_name: str | None = None) -> str:
     if not provider or not provider.startswith("onboarding-entra-"):
-        raise VaultError("no application secret provider for this session")
+        raise VaultError("this session has no vault entry for the application secret")
     if os.environ.get("ONBOARDING_ISC_TOKEN"):  # local stub runs only; never set on AgentCore
         base = os.environ.get("ONBOARDING_LOCAL_VAULT_URL", "http://127.0.0.1:8080")
         async with httpx.AsyncClient(base_url=base, timeout=10) as http:
             response = await http.get(f"/_local/apikey/{provider}")
         if response.status_code != 200:
-            raise VaultError(f"the local vault has no secret for this session (HTTP {response.status_code})")
+            raise VaultError(f"the local vault has no value for this session (HTTP {response.status_code})")
         return response.json()["apiKey"]
     from bedrock_agentcore.services.identity import IdentityClient
 
@@ -50,10 +50,12 @@ async def get_application_secret(provider: str, workload_name: str | None = None
         token = await _workload_token(workload_name)
         result = client.get_api_key(provider_name=provider, agent_identity_token=token)
         value = await result if asyncio.iscoroutine(result) else result
-    except Exception as exc:  # noqa: BLE001 — reported without the value
-        raise VaultError(f"AgentCore Identity refused the application secret: {type(exc).__name__}") from None
+    except VaultError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — reported without the value; worded so the masker leaves it readable
+        raise VaultError(f"AgentCore Identity could not return the stored value ({type(exc).__name__})") from None
     if not value:
-        raise VaultError("the vault returned an empty application secret")
+        raise VaultError("the vault returned an empty value")
     return str(value)
 
 

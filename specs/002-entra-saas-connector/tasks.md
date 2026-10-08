@@ -547,6 +547,9 @@ Where the code differs from the task text:
   - `lifecycle_review`: the leaver actions for review.
 - **The Entra prompt rules** live in a playbook file, `catalog/playbooks/entra-id/prompt.md`, appended to the static
   prompt only for playbooks that have one. The AWS prompt is byte-identical (T005).
+- **Machine Account Classification** (added after the canvas, from a UI-configured source): with service principals,
+  `set_machine_classification` turns it on (`CRITERIA`: managed identities, service principals Application/Legacy) and
+  runs Process Classification; the skill gained `isc-source.sh classification` with the same asset.
 - **The catalog API** returns a `plan_preview` per capability type for the new-session "what happens" panel (R15).
 - **Eval cost** is higher than first estimated. `--suite entra_failures` is about 330 calls (about $1.30) at 3 runs for
   text and screenshot. The screenshots are rendered from the case text on the first (paid) run. None was run here.

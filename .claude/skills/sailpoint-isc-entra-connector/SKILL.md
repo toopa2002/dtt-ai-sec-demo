@@ -43,7 +43,8 @@ a template rather than the scripts when the user wants something different.
   `app-role-assignment.tmpl.json`, `oauth2-permission-grant.tmpl.json`, `directory-roles.json`,
   `role-assignment.tmpl.json`, `azure-rbac.json`
 - ISC: `assets/isc/source-create.tmpl.json`, `source-configure.patch.tmpl.json`, `feature-toggles.json`,
-  `aggregate-datasets.tmpl.json`, `account-schema-spn-attributes.json`, `provisioning-policy-create.tmpl.json`,
+  `aggregate-datasets.tmpl.json`, `account-schema-spn-attributes.json`, `machine-classification-config.json`,
+  `provisioning-policy-create.tmpl.json`,
   `correlation-config.tmpl.json`,
   `lifecycle-state-account-actions.patch.tmpl.json`, `schedule.tmpl.json`
 
@@ -55,7 +56,7 @@ a template rather than the scripts when the user wants something different.
 |---|---|---|
 | `readonly` | Graph User.Read.All, Group.Read.All, Organization.Read.All, RoleManagement.Read.Directory, Application.Read.All, AuditLog.Read.All | base: all groups (incl. M365), delta aggregation, page size 100; Teams, access packages, managed identities off |
 | `provisioning` | + User/Group ReadWrite, invite, enable/disable, password profile, role + app-role assignment write; **User Administrator** role | CREATE provisioning policy (`provisioning-policy`) |
-| `machine-identity` | Application.Read.All, DelegatedPermissionGrant.Read.All, Device.Read.All, CustomSecAttribute{Assignment,Definition}.Read.All | service principals as accounts (filter `servicePrincipalType eq 'Application'`) + their role/app-role/group/role-assignment/admin-consent/custom-attribute memberships; SP PIM off |
+| `machine-identity` | Application.Read.All, DelegatedPermissionGrant.Read.All, Device.Read.All, CustomSecAttribute{Assignment,Definition}.Read.All | service principals as accounts (filter `servicePrincipalType eq 'Application'`) + their role/app-role/group/role-assignment/admin-consent/custom-attribute memberships; SP PIM off; machine account classification on (`classification`) |
 | `ai-agents` | Application.Read.All, Azure Service Management user_impersonation (delegated); Azure RBAC (Reader + Cognitive Services Data Contributor) on `--foundry-subscriptions` | Foundry agents (latest version only) + Copilot Studio agents on; Agent 365 off (needs a user refresh token) |
 | `exchange` | Exchange Online Exchange.ManageAsApp; **Exchange Administrator** role; cert via `--exchange-cert` | manageExchangeOnline, aggregateAllGroups, cert |
 | `teams` | Teams/channel/app read set | enableTeamsGovernance |
@@ -137,6 +138,11 @@ Notes per step:
    reporting) any the tenant's form doesn't have. For `machine-identity` it also adds the service-principal
    attributes to the account schema (`schema-spn`, from `assets/isc/account-schema-spn-attributes.json`): the UI
    does that when the toggle is switched on, the API doesn't, and without them no service principal is aggregated.
+   It also turns on **Machine Account Classification** (`classification`, from
+   `assets/isc/machine-classification-config.json`): managed identities (`managedIdentity_type`) and service principals
+   (`spn_servicePrincipalType` Application or Legacy) become machine accounts, each with a machine identity unless it
+   is correlated to a person. `verify` then runs "Process Classification" (`POST /v2026/sources/{id}/classify`) after
+   the account aggregation, so accounts aggregated earlier are classified too.
 7. **verify = peek → test → aggregate**, in that order, each only if the previous passed:
    - *peek* reads 5 accounts through the connector — proves app, consent, secret and domain against live data.
      With Delta Aggregation on (the base setting), the connector only returns changes, so peek and a normal

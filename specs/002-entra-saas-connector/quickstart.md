@@ -137,6 +137,37 @@ Use a **test** Entra tenant and a **test** ISC tenant, with fictional names in a
 6. Clean up afterwards: delete the ISC source, then delete the Entra app registration with
    `az ad app delete --id <appId>` and the Azure role assignments.
 
+### Observed result: live run 2026-10-08 (T093)
+
+Run on a test Entra tenant and the partner ISC test tenant, through the cluster deployment (AgentCore runtime with
+Claude Haiku 4.5, session API on k3d), with all four capabilities. The Entra administrator's steps were run as the
+agent gave them. Tenant names are left out here (constitution).
+
+| Check | Result |
+|---|---|
+| First turn | `check_tenant_features` and `find_connector_sources` on `/v2026`: connector present, machine identities available, no existing source |
+| Setup checks (FR-112) | The agent caught a missing `AppRoleAssignment.ReadWrite.All` in the step 9 output (16 of 17). It was consent propagation (E6): the grant appeared a minute later |
+| Secret path (FR-120, FR-125) | CloudTrail: `CreateApiKeyCredentialProvider` (API user) 13:15:37 → `GetResourceApiKey` (agent runtime role) 13:20:04 → `DeleteApiKeyCredentialProvider` (API user) 13:20:42, right after Test Connection passed. The value appears in no message, action, event or log |
+| Proof (FR-133) | Connection check 5 accounts; Test Connection SUCCESS; 23 service-principal attributes added; entitlements 2,183; accounts 225, all on `/v2026` with delta off for the read and restored |
+| Counts (SC-104) | ISC 64 users + 161 service principals = Entra `az ad user list` 64 and `az ad sp list --filter "servicePrincipalType eq 'Application'"` 161 |
+| AI agents (FR-135) | `aggregate-agents` → 404 "endpoint is unavailable": reported as a tenant limitation with the ISC path; plan step blocked; the IAM engineer started it in ISC |
+| Provisioning (FR-136) | The source's existing CREATE policy was kept, and correlation was set (email = userPrincipalName, then mail). Step 11 showed User Administrator. Nothing was written to the directory |
+| SC-101 times | Entra administrator, from the first question to the secret received: 8 min 24 s (including about 2 min spent on bug 1 below); target ≤ 15 min, 225 accounts |
+
+Bugs the live run found, all fixed and covered by tests:
+1. **IAM**: `CreateApiKeyCredentialProvider` is authorised against `token-vault/default/apikeycredentialprovider/*`,
+   not the provider name; `agent-deploy.sh` now grants that resource, the same shape as the OAuth2 provider grant.
+2. **Vault reader**: the agent didn't pass the turn's `workload_name` to the vault read, so it got no token. Its error
+   text ("…secret: VaultError") was also masked by the generic `secret: <value>` rule. The vault failure is now worded
+   readably, and the new E12 says to fix the service, never to ask the administrator for a new secret. The agent had
+   misread the failure as the secret's ID being pasted instead of its Value.
+3. **Counts**: right after the aggregation task ended, ISC counted 158 of 225 accounts (index lag). Counts are now read
+   until two reads agree.
+4. **Session values** can't be corrected after the session starts: the source owner had to be an ISC identity, and was
+   fixed directly in MongoDB for the test. *Open: a way for the IAM engineer to edit session values.*
+5. **Deploys**: a redeployed runtime keeps serving a session from its warm runtime session (`onb-<session>`) until it
+   is stopped (`StopRuntimeSession`) or goes idle. *Open: stop warm sessions on deploy.*
+
 ## 5. Teardown (free)
 
 ```bash

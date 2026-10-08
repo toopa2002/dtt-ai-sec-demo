@@ -49,7 +49,8 @@ state: dict[str, Any] = {"sources": {}, "trust_broken": False, "aggregated": set
 def _entra_reset() -> None:
     state["entra"] = {"secret_invalid": False, "dataset_unavailable": False, "slow_polls": 0, "delta_empty_peek": False,
                       "existing_policy": False, "patches": [], "policies": {}, "correlation": {}, "datasets": {},
-                      "schemas": {}, "agents_aggregated": set(), "entitlements_loaded": set(), "account_creates": 0}
+                      "schemas": {}, "agents_aggregated": set(), "entitlements_loaded": set(), "account_creates": 0,
+                      "classification": {}, "classified": {}}
 
 
 _entra_reset()
@@ -203,6 +204,7 @@ async def stub_state() -> dict:
     entra = state["entra"]
     return {"sources": list(state["sources"].values()), "trust_broken": state["trust_broken"], "calls": state["calls"],
             "entra": {"patches": entra["patches"], "account_creates": entra["account_creates"],
+                      "classification": entra["classification"], "classified": entra["classified"],
                       "policies": entra["policies"], "datasets": entra["datasets"]}}
 
 
@@ -493,6 +495,34 @@ async def get_correlation_v2026(sid: str) -> Any:
 async def put_correlation_v2026(sid: str, request: Request) -> Any:
     state["entra"]["correlation"][sid] = await request.json()
     return state["entra"]["correlation"][sid]
+
+
+@app.get("/v2026/sources/{sid}/machine-classification-config")
+async def get_classification_v2026(sid: str) -> Any:
+    if not _entra(sid):
+        return _not_found()
+    return state["entra"]["classification"].get(sid) or {"sourceId": None, "enabled": False,
+                                                         "classificationMethod": "SOURCE", "criteria": None}
+
+
+@app.put("/v2026/sources/{sid}/machine-classification-config")
+async def put_classification_v2026(sid: str, request: Request) -> Any:
+    if not _entra(sid):
+        return _not_found()
+    body = await request.json()
+    if body.get("classificationMethod") not in ("SOURCE", "CRITERIA"):
+        return JSONResponse(status_code=400, content={"messages": [{"text": "classificationMethod: SOURCE or CRITERIA"}]})
+    state["entra"]["classification"][sid] = body | {"sourceId": sid}
+    return state["entra"]["classification"][sid]
+
+
+@app.post("/v2026/sources/{sid}/classify")
+async def classify_v2026(sid: str) -> Any:
+    if not _entra(sid):
+        return _not_found()
+    n = len(_entra_accounts(sid))
+    state["entra"]["classified"][sid] = n
+    return {"Accounts submitted for processing": n}
 
 
 @app.post("/v2026/accounts")
