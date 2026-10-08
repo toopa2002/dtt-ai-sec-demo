@@ -10,7 +10,7 @@ from ..masking import mask_obj
 
 Kind = Literal[
     "sign_in", "sign_in_failed", "locked", "user_created", "user_disabled", "password_reset", "role_changed",
-    "tenant_added", "credential_replaced",
+    "tenant_added", "credential_replaced", "session_reopened", "session_handover",
 ]
 
 

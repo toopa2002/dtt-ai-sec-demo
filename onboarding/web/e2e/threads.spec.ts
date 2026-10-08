@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { agentDone, banner, chip, otherThread, ownLog, ownThread, relayNotes, seed, send, signIn, stub } from './helpers';
+import { agentDone, banner, chip, otherThread, ownLog, ownThread, relayNotes, seed, send, signIn, stub, openOther } from './helpers';
 
 // T104: quickstart §3a steps 1–5 against the ISC stub (US3 revised; FR-006–FR-006c, FR-016a, SC-010).
 test('threads, relay notes, answering while waiting, and check reruns on the owner\'s confirmation', async ({ browser }) => {
@@ -8,10 +8,11 @@ test('threads, relay notes, answering while waiting, and check reruns on the own
   const owner = await signIn(browser, s.owner, s.password);
   await iam.goto(`sessions/${s.session_id}/iam`);
   await owner.goto(`sessions/${s.session_id}/owner`);
+  await openOther(owner); // the IAM engineer's thread is collapsed on the owner's screen by default (FR-006)
 
   // 1. Two threads per screen: own (message box, suggestions) and the other one view only (no box, no chips).
   for (const page of [iam, owner]) {
-    await expect(page.getByRole('heading', { name: 'Conversations' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: page === owner ? 'Your conversation' : 'Conversations' })).toBeVisible();
     await expect(ownThread(page).locator('#composer-text')).toBeVisible();
     await expect(ownThread(page).locator('button.suggestion').first()).toBeVisible();
     await expect(otherThread(page).getByText('View only')).toBeVisible();

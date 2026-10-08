@@ -35,9 +35,10 @@ means adding a catalog entry and one playbook folder. No change to the API, the 
 |---|---|---|
 | `setup.md` | Ordered application-side steps. Each has `title`, `read_only: true/false`, command template(s) with `{placeholders}` from session details and tenant values, and the expected output. | agent prompt (FR-011, FR-013, SC-002) |
 | `settings.yaml` | `connector_script` / spec id; `creation_only` fields (sent only on create, e.g. AWS SaaS `spConnectorSpecId`, `idnProxyType`, `spConnectorSupportsCustomSchemas`); `field_map` from session details to the connector form keys; `defaults` (e.g. change-password policy ARN). | `create_source`, `configure_source` |
-| `checks.yaml` | Which ISC checks map to which steps (`peek_accounts` → `connection_check`, aggregation kinds → `aggregation`, test → `test_connection`) and the success criteria. | agent tools, `set_step` |
+| `checks.yaml` | Which ISC checks map to which steps (`peek_accounts` → `connection_check`, aggregation kinds → `aggregation`, test → `test_connection`), the plan step id each milestone's `set_step` marks, and the success criteria. | agent tools, `set_step`, API milestone derivation |
 | `failures.md` | Known failures: signature (text and what it looks like on screen), side (`sailpoint` / `application`), cause, read-only confirm step, fix, and whether to retry once. | agent prompt (FR-021–FR-024, SC-005) |
 | `suggestions.yaml` | Default suggested messages per role and session state (`no_source`, `waiting_for_owner_output`, `check_failed`, `all_passed`, `any`), each `{text, kind}`; at least 3 per role for `any`. The application owner's list never contains `kind: order`. | API, topping up the agent's suggestions (FR-006e, research R17) |
+| `plan.yaml` | The starting plan: ordered steps `{id, title, actor, kind, milestone, setup_step?}`, covering the application-side setup (keyed to `setup.md`), the IAM engineer's order, source creation and configuration, and the checks. Seeded into each new session (FR-008b, research R22). | API at session creation; agent `update_plan` |
 | `collisions.md` | How to detect application-side items not created for this onboarding (AWS: role or stack name, trust naming another External ID) and the tenant-specific naming rule. | agent prompt (FR-014, FR-015) |
 
 ## AWS SaaS playbook sources (port, don't rewrite)
@@ -46,4 +47,5 @@ means adding a catalog entry and one playbook folder. No change to the API, the 
 |---|---|
 | `setup.md` | `.claude/skills/sailpoint-isc-aws-connector/scripts/aws-setup.sh` + `references/aws-permissions.md` (CloudFormation / StackSet commands, trust with the `ciem_universal` principals 874540850173 and 706944607044, External ID, read-only and discovery policies) |
 | `settings.yaml` | `scripts/isc-source.sh` (`create`, `configure`) + `references/isc-api.md` |
+| `plan.yaml` | the order of `aws-setup.sh` steps plus `isc-source.sh` create / configure / peek / aggregate / test |
 | `failures.md` | `references/troubleshooting.md` (trust / External ID, demo principal, `no schema provided`, `req.input is null`, AgentCore discovery permissions, change-password policy) |

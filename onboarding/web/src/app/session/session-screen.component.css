@@ -21,9 +21,20 @@ dt { color: var(--muted); }
 dd { margin: 0; word-break: break-all; }
 .small { font-size: 0.78rem; }
 .actions ol, .steps { list-style: none; margin: 0 0 0.75rem; padding: 0; font-size: 0.82rem; }
-.actions li { display: flex; gap: 0.5rem; padding: 0.55rem 0; border-top: 1px solid var(--border); }
+.actions li { border-top: 1px solid var(--border); }
+.actions .row { width: 100%; min-height: 44px; display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto 0.9rem; gap: 0.5rem;
+  align-items: start; padding: 0.5rem 0.3rem; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
+  text-align: left; cursor: pointer; }
+.actions .row:hover { background: var(--surface-2); }
+.actions .row:focus-visible { outline: 2px solid var(--highlight); }
+.actions li.failed .row { background: color-mix(in srgb, var(--bad) 7%, transparent); }
+.actions .what { min-width: 0; }
 .actions li small { display: block; color: var(--muted); }
-.actions li small.error { color: var(--bad); }
+.actions small.outcome { color: var(--ok); }
+.actions small.outcome.error { color: var(--bad); }
+.actions time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.icon.run { color: var(--info); flex: none; margin-top: 0.15rem; }
+.icon.chev { color: var(--muted); margin-top: 0.15rem; }
 .icon.ok { color: var(--ok); flex: none; margin-top: 0.15rem; }
 .icon.bad { color: var(--bad); flex: none; margin-top: 0.15rem; }
 .steps li { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; gap: 0.4rem; align-items: center; padding: 0.45rem 0.3rem;
@@ -41,6 +52,19 @@ dd { margin: 0; word-break: break-all; }
 .threads { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr); gap: 1rem; }
 .threads app-thread { min-height: 0; }
+.sync { margin-left: auto; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 36px; padding: 0.2rem 0.8rem;
+  border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
+.sync[aria-pressed='true'] { background: var(--text); color: var(--surface); border-color: var(--text); }
+.sync svg { width: 0.9rem; height: 0.9rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* The application owner's screen: their own thread full width, the IAM engineer's behind a bar (FR-006, research R25) */
+.threads.single { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; gap: 0.6rem; }
+.other-bar { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px; padding: 0.4rem 0.8rem;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit;
+  font-size: 0.85rem; text-align: left; cursor: pointer; }
+.other-bar svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; transition: transform 0.15s; }
+.other-bar svg.open { transform: rotate(90deg); }
+.other-bar .toggle { margin-left: auto; font-weight: 600; color: var(--info-strong); }
+.threads.single .other-open { height: clamp(240px, 38vh, 420px); }
 .finished { margin: 0; padding: 0.9rem 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
 @media (max-width: 1100px) {
   /* stacked: each thread keeps its own log height; the conversations column scrolls */

@@ -171,11 +171,14 @@ export class ComposerComponent {
     }
     this.busy.set(true);
     this.error.set(null);
+    // Clear at once: the reply can arrive over the live stream before this request returns, and anything typed in
+    // the meantime must not be wiped when it does. A failed send puts the text back if the box is still empty.
+    this.text = '';
     try {
       await this.api.sendMessage(this.sessionId(), text, ids);
-      this.text = '';
       this.pending.set([]);
     } catch (err) {
+      if (!this.text) this.text = text;
       this.error.set(apiError(err).message);
     } finally {
       this.busy.set(false);

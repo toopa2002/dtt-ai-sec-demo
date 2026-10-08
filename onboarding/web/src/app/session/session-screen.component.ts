@@ -1,31 +1,32 @@
-import { DatePipe } from '@angular/common';
-import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { afterNextRender, Component, computed, DestroyRef, effect, inject, Injector, input, OnInit, signal, viewChild,
+  viewChildren } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../auth/auth.service';
+import { ActionDialogComponent, actionLabel } from '../shared/action-dialog.component';
 import { ApiService, apiError } from '../shared/api.service';
 import { ComposerComponent } from '../shared/composer.component';
 import { LiveSession } from '../shared/live-stream.service';
-import { ConnectorType, Role } from '../shared/models';
+import { Action, ConnectorType, Role } from '../shared/models';
+import { PlanPanelComponent } from '../shared/plan-panel.component';
 import { StatusChipsComponent } from '../shared/status-chips.component';
 import { ThreadComponent } from '../shared/thread.component';
+import { minutes, TimeSync } from '../shared/time-sync';
 
-interface OwnerStep {
-  index: number;
-  text: string;
-  read_only: boolean;
-  state: 'pending' | 'current' | 'done' | 'failed';
-}
+const WIDE = '(min-width: 1101px)';
 
 /**
- * One screen per role over the same live session (FR-003, FR-006–FR-006d), following the design canvas: the header
- * with the status chips, the role's side panel (source + SailPoint actions for the IAM engineer; setup steps + the
- * values the agent fills in for the application owner), and "Conversations" with the viewer's own thread (writable,
- * with suggestions) beside the other participant's thread (view only). Connector-specific wording comes from the
- * catalog entry, never hard-coded (SC-009).
+ * One screen per role over the same live session (FR-003, FR-006–FR-006i), following the design canvas: the header
+ * with the status chips (a summary of the plan), the shared plan, the role's side panel (source + SailPoint actions
+ * with their details for the IAM engineer; the values the agent fills in for the application owner) and the
+ * conversation. The IAM engineer sees both threads side by side, scrolling in step by time; the application owner
+ * sees only their own thread, with the IAM engineer's collapsed until they open it. Connector-specific wording comes
+ * from the catalog entry, never hard-coded (SC-009).
  */
 @Component({
   selector: 'app-session-screen',
-  imports: [StatusChipsComponent, ThreadComponent, ComposerComponent, RouterLink, DatePipe],
+  imports: [StatusChipsComponent, ThreadComponent, ComposerComponent, RouterLink, DatePipe, PlanPanelComponent,
+    ActionDialogComponent, NgTemplateOutlet],
   providers: [LiveSession],
   template: `
     @if (error()) {
@@ -47,7 +48,40 @@ interface OwnerStep {
 
       <div class="layout">
         <aside class="side">
+          <app-plan-panel [plan]="s.plan ?? []" [viewerRole]="role()" [nextId]="s.next_step_id ?? null"
+                          [done]="s.plan_done ?? 0" [total]="s.plan_total ?? 0" [ownerLabel]="ownerLabel()" />
           @if (role() === 'iam_engineer') {
+            <section class="card actions" aria-label="SailPoint actions" i18n-aria-label="@@side.actionsAria">
+              <h2 i18n="@@side.actions">SailPoint actions</h2>
+              <p class="muted small" i18n="@@side.actionsHintDetails">Every change the agent made and who ordered it. Open one for the request and response.</p>
+              <ol>
+                @for (a of live.actions(); track a.id) {
+                  <li [class.failed]="a.result === 'failed'">
+                    <button type="button" class="row" (click)="openAction(a)" [attr.data-action]="a.action">
+                      @if (a.result === 'ok') { <svg class="icon ok" viewBox="0 0 24 24" aria-label="passed"><path d="M5 12l5 5L20 7"></path></svg> }
+                      @else if (a.result === 'running') { <svg class="icon run" viewBox="0 0 24 24" aria-label="running"><path d="M12 3a9 9 0 1 0 9 9"></path></svg> }
+                      @else { <svg class="icon bad" viewBox="0 0 24 24" aria-label="failed"><path d="M6 6l12 12M18 6L6 18"></path></svg> }
+                      <span class="what"><b>{{ actionLabel(a.action) }}</b> {{ a.source?.name }}
+                        <small class="outcome" [class.error]="a.result === 'failed'">{{ a.outcome ?? a.error ?? a.result }}</small>
+                        <small>{{ orderedBy }} {{ a.ordered_by.display_name }}
+                          @if (a.trigger === 'application_owner_confirmation') { · <span i18n="@@side.rerun">rerun after the application owner confirmed a fix</span> }
+                        </small>
+                      </span>
+                      <time>{{ a.at | date: 'HH:mm' }}</time>
+                      <svg class="icon chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+                    </button>
+                  </li>
+                } @empty {
+                  <li class="muted small" i18n="@@side.noActions">No changes yet.</li>
+                }
+              </ol>
+              @if (s.check_order) {
+                <p class="muted small" i18n="@@side.standingOrder">Your order to run the checks stands: the agent reruns them when the application owner confirms a fix.</p>
+              }
+              @if (s.status === 'open') {
+                <button type="button" (click)="finish()" i18n="@@session.finish">Finish session</button>
+              }
+            </section>
             <section class="card" aria-label="Source details" i18n-aria-label="@@side.sourceAria">
               <h2 i18n="@@side.source">Source</h2>
               <dl>
@@ -61,54 +95,9 @@ interface OwnerStep {
                 <dt i18n="@@side.access">Access</dt><dd i18n="@@side.accessValue">read-only (aggregation)</dd>
               </dl>
             </section>
-            <section class="card actions" aria-label="SailPoint actions" i18n-aria-label="@@side.actionsAria">
-              <h2 i18n="@@side.actions">SailPoint actions</h2>
-              <p class="muted small" i18n="@@side.actionsHint">Every change the agent made, and who ordered it.</p>
-              <ol>
-                @for (a of live.actions(); track a.id) {
-                  <li [class.failed]="a.result === 'failed'">
-                    @if (a.result === 'ok') { <svg class="icon ok" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg> }
-                    @else { <svg class="icon bad" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg> }
-                    <span><b>{{ actionLabel(a.action) }}</b> {{ a.source?.name }}
-                      <small>{{ orderedBy }} {{ a.ordered_by.display_name }} · {{ a.at | date: 'HH:mm' }}
-                        @if (a.trigger === 'application_owner_confirmation') { · <span i18n="@@side.rerun">rerun after the application owner confirmed a fix</span> }
-                      </small>
-                      @if (a.error) { <small class="error">{{ a.error }}</small> }
-                    </span>
-                  </li>
-                } @empty {
-                  <li class="muted small" i18n="@@side.noActions">No changes yet.</li>
-                }
-              </ol>
-              @if (s.check_order) {
-                <p class="muted small" i18n="@@side.standingOrder">Your order to run the checks stands: the agent reruns them when the application owner confirms a fix.</p>
-              }
-              @if (s.status === 'open') {
-                <button type="button" (click)="finish()" i18n="@@session.finish">Finish session</button>
-              }
-            </section>
+            <app-action-dialog [sessionId]="s.id" [summary]="openedAction()" (closed)="openedAction.set(null)"
+                               (showInThread)="showInThread($event)" />
           } @else {
-            <section class="card" aria-label="Setup steps" i18n-aria-label="@@owner.stepsAria">
-              <h2>{{ stepsTitle() }}</h2>
-              <p class="muted small" i18n="@@owner.stepsHint">Run each step where the agent says and paste the output back. The agent never acts on your application and never needs its credentials.</p>
-              <ol class="steps">
-                @for (st of ownerSteps(); track st.index) {
-                  <li [class]="st.state" [attr.data-state]="st.state">
-                    <span class="n">
-                      @switch (st.state) {
-                        @case ('done') { <svg class="icon ok" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg> }
-                        @case ('failed') { <svg class="icon bad" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg> }
-                        @default { {{ st.index }} }
-                      }
-                    </span>
-                    <span class="t">{{ st.text }}</span>
-                    <span class="tag" [class.ro]="st.read_only" [class.ch]="!st.read_only">{{ st.read_only ? readOnly : change }}</span>
-                  </li>
-                } @empty {
-                  <li class="muted small empty" i18n="@@owner.noSteps">Ask the agent what to set up first.</li>
-                }
-              </ol>
-            </section>
             <section class="card" aria-label="Session values" i18n-aria-label="@@owner.valuesAria">
               <h2 i18n="@@owner.values">Values the agent fills in for you</h2>
               <dl>
@@ -124,21 +113,52 @@ interface OwnerStep {
 
         <section class="conversations" aria-label="Conversations" i18n-aria-label="@@conv.aria">
           <header class="conv-head">
-            <h2 i18n="@@conv.title">Conversations</h2>
+            <h2>{{ role() === 'iam_engineer' ? convTitle : yourConvTitle }}</h2>
             <span class="muted small">{{ convHint() }}</span>
+            @if (role() === 'iam_engineer') {
+              <button type="button" class="sync" [attr.aria-pressed]="syncOn()" [disabled]="!wide()" (click)="toggleSync()"
+                      [title]="wide() ? '' : narrowSyncHint">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"></path></svg>
+                {{ syncOn() && wide() ? syncOnText : syncOffText }}
+              </button>
+            }
           </header>
-          <div class="threads">
-            <app-thread [thread]="role()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
-                        [names]="names()" [emptyText]="emptyText()">
-              @if (s.status === 'open') {
-                <app-composer [sessionId]="s.id" [placeholder]="placeholder()" [hint]="composerHint()" />
-              } @else {
-                <p class="finished" i18n="@@session.finished">This session is finished. The history stays for 90 days.</p>
+          @if (role() === 'iam_engineer') {
+            <div class="threads">
+              <app-thread [thread]="role()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
+                          [names]="names()" [viewerId]="meId()" [emptyText]="emptyText()" [dividerTimes]="dividerTimes()">
+                <ng-container *ngTemplateOutlet="composer" />
+              </app-thread>
+              <app-thread [thread]="otherRole()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
+                          [names]="names()" [viewerId]="meId()" [emptyText]="otherEmptyText()" [dividerTimes]="dividerTimes()" />
+            </div>
+          } @else {
+            <div class="threads single">
+              <app-thread [thread]="role()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
+                          [names]="names()" [viewerId]="meId()" [emptyText]="emptyText()">
+                <ng-container *ngTemplateOutlet="composer" />
+              </app-thread>
+              <!-- FR-006: the IAM engineer's thread is hidden by default; a display choice, not a permission -->
+              <button type="button" class="other-bar" [attr.aria-expanded]="showOther()" aria-controls="other-thread"
+                      (click)="showOther.set(!showOther())">
+                <svg viewBox="0 0 24 24" aria-hidden="true" [class.open]="showOther()"><path d="M9 6l6 6-6 6"></path></svg>
+                <b>{{ otherPairLabel() }}</b>
+                <span class="muted">{{ showOther() ? '' : hiddenText }} · {{ names()[otherRole()] }} · {{ viewOnlyText }}</span>
+                <span class="toggle">{{ showOther() ? hideText : showText }}</span>
+              </button>
+              @if (showOther()) {
+                <app-thread id="other-thread" class="other-open" [thread]="otherRole()" [viewerRole]="role()"
+                            [sessionId]="s.id" [ownerLabel]="ownerLabel()" [names]="names()" [viewerId]="meId()" [emptyText]="otherEmptyText()" />
               }
-            </app-thread>
-            <app-thread [thread]="otherRole()" [viewerRole]="role()" [sessionId]="s.id" [ownerLabel]="ownerLabel()"
-                        [names]="names()" [emptyText]="otherEmptyText()" />
-          </div>
+            </div>
+          }
+          <ng-template #composer>
+            @if (s.status === 'open') {
+              <app-composer [sessionId]="s.id" [placeholder]="placeholder()" [hint]="composerHint()" />
+            } @else {
+              <p class="finished" i18n="@@session.finishedAdmin">This session is finished. An admin can reopen it.</p>
+            }
+          </ng-template>
         </section>
       </div>
     } @else {
@@ -178,25 +198,38 @@ export class SessionScreenComponent implements OnInit {
       application_owner: p?.application_owner?.display_name,
     };
   });
-  protected readonly stepsTitle = computed(() => {
-    const app = this.connector()?.application_label ?? 'the application';
-    return $localize`:@@owner.steps:Your steps in ${app}:app:`;
-  });
-  protected readonly ownerSteps = computed<OwnerStep[]>(() => {
-    const seen = new Map<number, { index: number; text: string; read_only: boolean }>();
-    for (const m of this.live.messages()) for (const s of m.application_steps ?? []) seen.set(s.index, s);
-    const list = [...seen.values()].sort((a, b) => a.index - b.index);
-    const ready = this.live.session()?.steps.application_ready;
-    return list.map((s, i) => ({
-      ...s,
-      state: i < list.length - 1 || ready === 'passed' ? 'done' : ready === 'failed' ? 'failed' : 'current',
-    }));
-  });
+  protected readonly convTitle = $localize`:@@conv.title:Conversations`;
+  protected readonly yourConvTitle = $localize`:@@conv.yours:Your conversation`;
+  protected readonly syncOnText = $localize`:@@conv.syncOn:Sync by time: on`;
+  protected readonly syncOffText = $localize`:@@conv.syncOff:Sync by time: off`;
+  protected readonly narrowSyncHint = $localize`:@@conv.syncNarrow:The threads scroll separately when they are stacked.`;
+  protected readonly hiddenText = $localize`:@@conv.hidden:(hidden)`;
+  protected readonly viewOnlyText = $localize`:@@thread.viewOnlyLower:view only`;
+  protected readonly showText = $localize`:@@conv.show:Show`;
+  protected readonly hideText = $localize`:@@conv.hide:Hide`;
   protected readonly convHint = computed(() =>
     this.role() === 'iam_engineer'
-      ? $localize`:@@conv.hintIam:One thread per person. The agent works between them; only you can order SailPoint changes.`
-      : $localize`:@@conv.hintOwner:One thread per person. The agent works between them; SailPoint changes are the IAM engineer's to order.`,
+      ? $localize`:@@conv.hintIamSync:Both threads scroll together by time. Only you can order SailPoint changes.`
+      : $localize`:@@conv.hintOwnerOnly:The agent tells you what you need from the IAM engineer's side. SailPoint changes are theirs to order.`,
   );
+  protected readonly otherPairLabel = computed(() => $localize`:@@thread.pairOther:${this.otherRoleLabel()}:role: ↔ Agent`);
+  /** The application owner's view of the IAM engineer's thread: collapsed on every visit (research R25). */
+  protected readonly showOther = signal(false);
+  /** FR-006i: the IAM engineer's two threads scroll in step by time; on by default, remembered on this browser. */
+  protected readonly syncOn = signal(true);
+  protected readonly wide = signal(true);
+  protected readonly dividerTimes = computed(() =>
+    this.role() === 'iam_engineer' && this.syncOn() && this.wide()
+      ? minutes(this.live.iamThread(), this.live.ownerThread()) : null,
+  );
+  protected readonly openedAction = signal<Action | null>(null);
+  protected readonly meId = computed(() => this.auth.me()?.id ?? null);
+  private readonly threads = viewChildren(ThreadComponent);
+  private readonly dialog = viewChild(ActionDialogComponent);
+  private readonly injector = inject(Injector);
+  private readonly destroyRef = inject(DestroyRef);
+  private sync: TimeSync | null = null;
+  protected readonly actionLabel = actionLabel;
   protected readonly placeholder = computed(() =>
     this.role() === 'iam_engineer'
       ? $localize`:@@composer.iamPlaceholder:Order the agent: create the connector, rerun the connection check, start aggregation…`
@@ -216,13 +249,34 @@ export class SessionScreenComponent implements OnInit {
     $localize`:@@chat.emptyOther:Nothing yet in ${this.otherRoleLabel()}:role:'s thread.`,
   );
 
+  constructor() {
+    // Re-couple the two logs whenever the threads are (re)created (research R26).
+    effect(() => {
+      const threads = this.threads();
+      afterNextRender({ write: () => this.coupleThreads(threads) }, { injector: this.injector });
+    });
+    // Handed over by an admin (FR-033): this person no longer has access; back to their sessions.
+    effect(() => {
+      if (this.live.revoked()) void this.router.navigate(['/sessions'], { queryParams: { left: this.id() } });
+    });
+    this.destroyRef.onDestroy(() => this.sync?.destroy());
+  }
+
   async ngOnInit(): Promise<void> {
+    const media = typeof matchMedia === 'function' ? matchMedia(WIDE) : null;
+    if (media) {
+      this.wide.set(media.matches);
+      const onChange = (e: MediaQueryListEvent) => this.wide.set(e.matches);
+      media.addEventListener('change', onChange);
+      this.destroyRef.onDestroy(() => media.removeEventListener('change', onChange));
+    }
     try {
-      await this.live.open(this.id());
+      await this.live.open(this.id(), this.role());
       const s = this.live.session();
       const catalog = await this.api.catalog();
       this.connector.set(catalog.find((c) => c.id === s?.connector_type) ?? null);
       const me = this.auth.me();
+      if (me) this.syncOn.set(readSync(me.id));
       // The screen must match the signed-in role (FR-003); the API enforces this too.
       if (me && me.role !== this.role()) {
         void this.router.navigate(['/sessions', this.id(), me.role === 'iam_engineer' ? 'iam' : 'owner']);
@@ -240,17 +294,28 @@ export class SessionScreenComponent implements OnInit {
     return Array.isArray(v) ? v.join(', ') : String(v);
   }
 
-  protected actionLabel(a: string): string {
-    return (
-      {
-        create_source: $localize`:@@action.create:Created source`,
-        configure_source: $localize`:@@action.configure:Configured source`,
-        connection_check: $localize`:@@action.check:Connection check`,
-        aggregate: $localize`:@@action.aggregate:Aggregation`,
-        test_connection: $localize`:@@action.test:Test Connection`,
-        delete_source: $localize`:@@action.delete:Deleted source`,
-      }[a] ?? a
-    );
+  protected toggleSync(): void {
+    const on = !this.syncOn();
+    this.syncOn.set(on);
+    const me = this.auth.me();
+    if (me) writeSync(me.id, on);
+  }
+
+  protected openAction(a: Action): void {
+    this.openedAction.set(a);
+    afterNextRender({ write: () => void this.dialog()?.open() }, { injector: this.injector });
+  }
+
+  protected showInThread(messageId: string): void {
+    for (const t of this.threads()) t.scrollToMessage(messageId);
+  }
+
+  private coupleThreads(threads: readonly ThreadComponent[]): void {
+    this.sync?.destroy();
+    this.sync = null;
+    if (this.role() !== 'iam_engineer' || threads.length < 2) return;
+    const [a, b] = threads.map((t) => t.logElement());
+    if (a && b) this.sync = new TimeSync(a, b, () => this.syncOn() && this.wide());
   }
 
   protected async finish(): Promise<void> {
@@ -260,5 +325,25 @@ export class SessionScreenComponent implements OnInit {
     } catch (err) {
       this.error.set(apiError(err).message);
     }
+  }
+}
+
+function syncKey(userId: string): string {
+  return `onboarding.sync.${userId}`;
+}
+
+function readSync(userId: string): boolean {
+  try {
+    return localStorage.getItem(syncKey(userId)) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function writeSync(userId: string, on: boolean): void {
+  try {
+    localStorage.setItem(syncKey(userId), on ? 'on' : 'off');
+  } catch {
+    // storage blocked: the choice lasts for this page only
   }
 }

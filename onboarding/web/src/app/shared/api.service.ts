@@ -3,12 +3,14 @@ import { inject, Injectable } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import {
   Action,
+  AdminSession,
   ApiError,
   Attachment,
   ConnectorType,
   Me,
   Message,
   Person,
+  Role,
   Session,
   SessionSummary,
   Suggestions,
@@ -90,6 +92,23 @@ export class ApiService {
   }
   suggestions(id: string) {
     return this.get<Suggestions>(`sessions/${id}/suggestions`);
+  }
+  /** One SailPoint action with its request, response and diagnosis (FR-020a); IAM engineer only. */
+  action(id: string, actionId: string) {
+    return this.get<Action>(`sessions/${id}/actions/${actionId}`);
+  }
+  adminSessions() {
+    return this.get<AdminSession[]>('admin/sessions');
+  }
+  reopenSession(id: string) {
+    return this.send<{ reopened: boolean }>('POST', `admin/sessions/${id}/reopen`);
+  }
+  handOver(id: string, place: Role, userId: string) {
+    return this.send<{ applied: boolean }>('POST', `admin/sessions/${id}/handover`, { place, user_id: userId });
+  }
+  /** Long-poll fallback for the event stream: events after `after`, waiting up to 25 s for the first one. */
+  pollEvents(id: string, after: number) {
+    return this.get<{ events: { id: number; type: string; data: unknown }[] }>(`sessions/${id}/events/poll?after=${after}`);
   }
   upload(id: string, file: File) {
     const form = new FormData();

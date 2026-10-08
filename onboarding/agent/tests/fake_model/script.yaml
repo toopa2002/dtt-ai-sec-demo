@@ -1,0 +1,147 @@
+# Scripted model replies for the local dev stack and the e2e/smoke runs (Constitution IV, research R28).
+# The first rule whose `when` matches decides one round of a turn. Conditions:
+#   role: iam_engineer | application_owner      text: regex on the writer's message
+#   round / min_round: model call number within the turn (0 = first)
+#   last / not_last: regex on the latest tool results     has_source: true | false
+#   tool_offered / tool_not_offered: a tool name the turn may use
+# `then`: blocks for that round, {text: ...} or {tool: name, input: {...}}; a tool the turn may not use is dropped.
+# Placeholders: {error} {role_name} {left} {first_steps}. A round with no blocks ends the turn.
+# `delay: seconds` holds the round before it answers (for tests that need a busy agent).
+rules:
+
+  # ---------------------------------------------------------------- tests: a slow answer keeps the agent busy
+  - when: {round: 0, text: '^slow question'}
+    delay: 4
+    then:
+      - text: "Here is the slow answer."
+
+  # ---------------------------------------------------------------- after any SailPoint check failed (trust)
+  - when: {min_round: 1, last: '"ok": false.*(AssumeRole|not authorized|trust)'}
+    then:
+      - text: |
+          **Side: AWS.** The connection check failed: `{error}`. SailPoint could not assume the role
+          `{role_name}` because its trust does not accept this tenant. Nothing to change in SailPoint; I've asked the
+          AWS owner to check the role trust.
+      - tool: post_to_other_thread
+        input:
+          text: |
+            The connection check failed: SailPoint could not assume the role. Please run this **read-only** check of
+            the role trust and paste the output:
+
+            ```bash
+            aws iam get-role --role-name {role_name} --query Role.AssumeRolePolicyDocument
+            ```
+          relay_note: Asked the AWS owner to run the read-only get-role check on the role trust.
+      - tool: set_waiting
+        input: {"on": application_owner, reason: run the get-role check and paste the output}
+      - tool: note_diagnosis
+        input: {text: "Cause on the AWS side: the role's trust does not let SailPoint assume it. Nothing to change in SailPoint."}
+      - tool: update_plan
+        input:
+          ops:
+            - {op: add, after: connection_check, title: "Fix the role's trust", actor: application_owner, kind: change,
+               milestone: application_ready, state: in_progress, reason: "SailPoint could not assume the role."}
+            - {op: set_state, step_id: aggregation, state: blocked, reason: Waits on the trust fix.}
+            - {op: set_state, step_id: test_connection, state: blocked, reason: Waits on the trust fix.}
+      - tool: suggest_replies
+        input:
+          thread: iam_engineer
+          items:
+            - {text: "Why did the connection check fail?", kind: question}
+            - {text: Rerun the connection check, kind: order}
+            - {text: "What is left to do?", kind: question}
+
+  - when: {min_round: 1, last: '"ok": false'}
+    then:
+      - text: "**Side: SailPoint.** The check failed: `{error}`."
+
+  # ---------------------------------------------------------------- IAM engineer orders
+  - when: {role: iam_engineer, round: 0, has_source: false, text: 'create|connector|run the checks'}
+    then:
+      - text: "Creating the source and running the checks now."
+      - {tool: create_source}
+      - {tool: configure_source}
+      - {tool: peek_accounts}
+
+  - when: {role: iam_engineer, round: 0, has_source: true, text: 'rerun|run the|again|fixed|check'}
+    then:
+      - text: "Rerunning the checks now."
+      - {tool: peek_accounts}
+
+  - when: {role: iam_engineer, min_round: 1, last: '"accounts_read"'}
+    then:
+      - {tool: start_aggregation}
+      - {tool: test_connection}
+
+  - when: {role: iam_engineer, min_round: 1, last: '"task_ids".*"ok": true|"ok": true.*"task_ids"'}
+    then:
+      - text: "All checks passed: connection check, aggregation and Test Connection succeeded."
+      - tool: notify_other_thread
+        input: {relay_note: "All SailPoint checks passed; the source is live."}
+      - tool: set_waiting
+        input: {"on": null}
+
+  # ---------------------------------------------------------------- application owner
+  - when: {role: application_owner, round: 0, text: 'what do i need|what .*set ?up|first step'}
+    then:
+      - text: |
+          Here are your first steps in AWS. Run them in the management account and paste the output back.
+
+          {first_steps}
+      - tool: update_plan
+        input:
+          ops:
+            - {op: set_state, step_id: check_org, state: in_progress}
+      - tool: suggest_replies
+        input:
+          thread: application_owner
+          items:
+            - {text: "Here is the output:", kind: answer}
+            - {text: I get an error at this step, kind: answer}
+            - {text: Explain what this step does, kind: question}
+
+  - when: {role: application_owner, round: 0, text: 'tell the iam engineer'}
+    then:
+      - text: "Done, I passed your message on to the IAM engineer."
+      - tool: post_to_other_thread
+        input:
+          text: "Message from the AWS owner: they are on a call for the next 10 minutes."
+          relay_note: Passed your message on to the IAM engineer.
+          relayed_from: application_owner
+
+  - when: {role: application_owner, round: 0, text: 'finished|role is ready|fixed|applied|done', tool_offered: peek_accounts}
+    then:
+      - text: "Thanks. Rerunning the SailPoint checks now."
+      - {tool: peek_accounts}
+      - {tool: start_aggregation}
+      - {tool: test_connection}
+
+  - when: {role: application_owner, min_round: 1, last: '"task_ids"', not_last: '"ok": false'}
+    then:
+      - text: "They passed: connection check, aggregation and Test Connection all succeeded."
+      - tool: post_to_other_thread
+        input:
+          text: "All checks passed after the AWS owner's fix: connection check, aggregation and Test Connection succeeded."
+          relay_note: Reported the check results in the IAM engineer's thread.
+      - tool: set_waiting
+        input: {"on": null}
+
+  - when: {role: application_owner, round: 0, text: 'connector|sailpoint'}
+    then:
+      - text: >-
+          SailPoint changes are ordered by the IAM engineer, and they can do so at any time. I never need your AWS
+          keys: if that key was real, please rotate it.
+
+  - when: {role: application_owner, round: 0, text: 'output|here is'}
+    then:
+      - text: "Thanks, that matches what I expect. Carry on with the next step."
+
+  # ---------------------------------------------------------------- both
+  - when: {round: 0, text: 'what is left'}
+    then:
+      - text: "Still to do: {left}."
+
+  # Anything else: a short fixed reply in round 0; later rounds end the turn.
+  - when: {round: 0}
+    then:
+      - text: "Thanks, noted. Ask me what is left to do at any time."

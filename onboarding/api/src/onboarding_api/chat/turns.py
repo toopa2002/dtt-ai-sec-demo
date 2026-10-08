@@ -27,10 +27,11 @@ from ..config import settings
 from ..db import db, screenshots
 from ..logging import turn_id_var
 from ..masking import mask_obj, mask_text
-from ..metrics import record_metric
+from ..metrics import record_metric, record_usage
+from ..sessions import plan as plans
 from ..sessions import repo
 from ..tenants import service as tenants
-from . import events, messages, suggestions
+from . import events, messages, status, suggestions
 
 log = logging.getLogger(__name__)
 _running: dict[str, asyncio.Task] = {}
@@ -76,6 +77,66 @@ async def _drain(session_id: ObjectId) -> None:
             await _fail(session_id, message, turn_id, "The turn failed unexpectedly.")
         finally:
             await _release(session_id, turn_id)
+            await _after_turn(session_id)
+
+
+async def queue_status(session_id: ObjectId, message: dict) -> tuple[int, str]:
+    """How many messages are before this one in the session queue, and the status text for its reply (FR-006h)."""
+    ahead_docs = [m async for m in db().messages.find(
+        {"session_id": session_id, "queue_state": {"$in": ["queued", "processing"]}, "seq": {"$lt": message["seq"]}},
+        sort=[("seq", 1)], projection={"speaker_user_id": 1, "queue_state": 1})]
+    first = next((m for m in ahead_docs if m.get("queue_state") == "processing"), ahead_docs[0] if ahead_docs else None)
+    name, same = None, False
+    if first:
+        same = first.get("speaker_user_id") == message.get("speaker_user_id")
+        user = await db().users.find_one({"_id": first.get("speaker_user_id")}, projection={"display_name": 1})
+        name = (user or {}).get("display_name")
+    return len(ahead_docs), status.received_text(len(ahead_docs), name, same)
+
+
+async def create_reply(session_id: ObjectId, message: dict) -> dict:
+    """The agent's reply, created with the participant's message: `received` with how many are ahead (research R21)."""
+    ahead, text = await queue_status(session_id, message)
+    return await messages.add(session_id, speaker="agent", thread=message.get("thread") or message["speaker"],
+                              text="", reply_to=message["_id"], reply_state="received", ahead=ahead,
+                              status_text=text)
+
+
+async def _reply_status(session_id: ObjectId, reply: dict) -> None:
+    await events.emit(session_id, "reply.status", {"message_id": str(reply["_id"]), "reply_state": reply["reply_state"],
+                                                   "ahead": reply.get("ahead"), "status_text": reply.get("status_text")})
+
+
+async def refresh_waiting_replies(session_id: ObjectId) -> None:
+    """Recount `ahead` for every reply still `received` and tell both screens about the ones that changed."""
+    async for message in db().messages.find({"session_id": session_id, "queue_state": "queued"}, sort=[("seq", 1)]):
+        reply = await messages.reply_for(message["_id"])
+        if not reply or reply.get("reply_state") != "received":
+            continue
+        ahead, text = await queue_status(session_id, message)
+        if ahead != reply.get("ahead") or text != reply.get("status_text"):
+            updated = await messages.set_reply(reply["_id"], ahead=ahead, status_text=text)
+            if updated:
+                await _reply_status(session_id, updated)
+
+
+async def _store_plan(session_id: ObjectId, plan: list[dict]) -> None:
+    """Save the plan, re-derive the milestones and tell both screens (FR-008a-c)."""
+    for change in await repo.set_plan(session_id, plan):
+        await events.emit(session_id, "step.changed", change)
+    done, total, next_step = plans.progress(plan)
+    await events.emit(session_id, "plan.updated", {"plan": plans.public(plan), "done": done, "total": total,
+                                                   "next_step_id": next_step})
+
+
+async def _after_turn(session_id: ObjectId) -> None:
+    """A handover asked for during the turn takes effect now that the answer is complete (research R23)."""
+    from ..sessions import admin
+
+    try:
+        await admin.apply_pending_handover(session_id)
+    except Exception:  # noqa: BLE001
+        log.exception("pending handover failed")
 
 
 async def _context(session: dict, tenant: dict) -> dict:
@@ -87,6 +148,7 @@ async def _context(session: dict, tenant: dict) -> dict:
                    "credential_provider": tenant["credential_provider"], "external_id": tenant.get("external_id")},
         "details": session["details"],
         "steps": steps,
+        "plan": [{k: v for k, v in step.items() if k != "changed_at"} for step in plans.public(session.get("plan") or [])],
         "source": session.get("source"),
     }
 
@@ -96,7 +158,8 @@ async def _history(session_id: ObjectId, current_id: ObjectId) -> list[dict]:
     get a higher seq than messages that were already queued), minus the current message and messages still waiting
     behind it. Each entry is tagged with its thread and kind (FR-006a)."""
     limit = settings().history_messages
-    query = {"session_id": session_id, "_id": {"$ne": current_id}, "queue_state": {"$nin": ["queued", "processing"]}}
+    query = {"session_id": session_id, "_id": {"$ne": current_id}, "queue_state": {"$nin": ["queued", "processing"]},
+             "reply_state": {"$nin": ["received", "working"]}}
     items = [m async for m in db().messages.find(query, sort=[("seq", -1)], limit=limit)]
     items.reverse()
     older = await db().messages.count_documents(query)
@@ -137,15 +200,14 @@ async def refresh_suggestions(session_id: ObjectId, agent_items: dict[str, list]
     if not session:
         return
     defaults = catalog.suggestion_defaults(session["connector_type"])
-    for thread, user_key in (("iam_engineer", "iam_engineer_id"), ("application_owner", "application_owner_id")):
+    for thread in messages.THREADS:
         items = suggestions.for_thread(session, thread, (agent_items or {}).get(thread) or [], defaults)
         public = [{"text": i["text"], "kind": i["kind"]} for i in items]
         event_id = session.get("event_seq", 0)
         await repo.set_suggestions(session_id, thread, items, event_id)
-        if session.get(user_key):
-            await events.emit(session_id, "suggestions.updated",
-                              {"thread": thread, "items": public, "for_event_id": event_id},
-                              visible_to=str(session[user_key]))
+        await events.emit(session_id, "suggestions.updated",
+                          {"thread": thread, "items": public, "for_event_id": event_id},
+                          visible_to=events.for_role(thread))
 
 
 async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
@@ -158,6 +220,11 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
             return
         await messages.set_queue_state(message["_id"], "processing", turn_id)
         await events.emit(session_id, "message.queue", {"message_id": str(message["_id"]), "queue_state": "processing"})
+        reply_doc = await messages.reply_for(message["_id"]) or await create_reply(session_id, message)
+        reply_doc = await messages.set_reply(reply_doc["_id"], reply_state="working", ahead=0, turn_id=turn_id,
+                                             status_text=status.working_text(None)) or reply_doc
+        await _reply_status(session_id, reply_doc)
+        await refresh_waiting_replies(session_id)
         user = await db().users.find_one({"_id": message["speaker_user_id"]})
         thread = message.get("thread") or message["speaker"]
         other = messages.other_thread(thread)
@@ -186,10 +253,10 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
         started = time.monotonic()
         first_delta = True
         reply_text = ""
-        app_steps: list[dict] = []
         agent_suggestions: dict[str, list] = {}
-        reply_id = str(uuid.uuid4())
+        reply_id = str(reply_doc["_id"])
         wait_set = False
+        posted_other = False
         async for ev in agent.invoke(payload, f"onb-{session_id}"):
             kind = ev.get("type")
             if kind == "delta":
@@ -203,14 +270,45 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                 text = ev.get("text")
                 await events.emit(session_id, "agent.progress",
                                   {"turn_id": turn_id, "thread": thread, "text": mask_text(text) if text else None})
+                if text:
+                    updated = await messages.set_reply(reply_doc["_id"], status_text=status.working_text(text))
+                    if updated:
+                        await _reply_status(session_id, updated)
             elif kind == "set_step":
+                # A milestone from the SailPoint tools marks its plan step; the milestones follow the plan (R22).
+                current = (await repo.get(session_id)) or {}
+                current_plan = current.get("plan") or []
+                mapping = catalog.plan_steps_by_milestone(session["connector_type"])
+                old = ((current.get("steps") or {}).get(ev.get("step")) or {}).get("state", "not_started")
                 try:
-                    change = await repo.set_step(session_id, ev["step"], ev["state"])
+                    repo.check_transition(ev.get("step", ""), old, ev.get("state", ""))
                 except repo.TransitionError as exc:
                     log.warning("rejected step change: %s", exc)
-                    change = None
-                if change:
-                    await events.emit(session_id, "step.changed", change)
+                    continue
+                if any(st.get("milestone") == ev.get("step") for st in current_plan):
+                    try:
+                        new_plan = plans.mark_milestone(current_plan, ev.get("step", ""), ev.get("state", ""),
+                                                        mapping.get(ev.get("step", "")))
+                    except plans.PlanError as exc:
+                        log.warning("rejected step change: %s", exc)
+                    else:
+                        await _store_plan(session_id, new_plan)
+                else:  # a connector type without a plan step for this milestone: set the milestone itself
+                    try:
+                        change = await repo.set_step(session_id, ev["step"], ev["state"])
+                    except repo.TransitionError as exc:
+                        log.warning("rejected step change: %s", exc)
+                        change = None
+                    if change:
+                        await events.emit(session_id, "step.changed", change)
+            elif kind == "plan":
+                current = await repo.get(session_id)
+                try:
+                    new_plan = plans.apply_ops((current or {}).get("plan") or [], ev.get("ops") or [])
+                except plans.PlanError as exc:
+                    log.warning("rejected plan ops: %s", exc)
+                else:
+                    await _store_plan(session_id, new_plan)
             elif kind == "action":
                 if role == "iam_engineer":
                     ordered_by, trigger = user["_id"], "order"
@@ -226,21 +324,25 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                     log.warning("dropped action %s from an application owner turn without a standing order",
                                 ev.get("action"))
                     continue
-                record = await actions.add(session_id, tenant["_id"], ordered_by=ordered_by, turn_id=turn_id,
-                                           event=ev, trigger=trigger)
-                await events.emit(session_id, "action.recorded", await actions.public(record))
+                record, new = await actions.record(session_id, tenant["_id"], ordered_by=ordered_by, turn_id=turn_id,
+                                                   event=ev, trigger=trigger, order_message_id=message["_id"])
+                await events.emit(session_id, "action.recorded" if new else "action.updated",
+                                  await actions.public(record), visible_to=events.for_role("iam_engineer"))
+            elif kind == "diagnosis":
+                noted = await actions.set_diagnosis(turn_id, ev.get("text", ""))
+                if noted:
+                    await events.emit(session_id, "action.updated", await actions.public(noted),
+                                      visible_to=events.for_role("iam_engineer"))
             elif kind == "source":
                 source = {"id": ev["id"], "name": ev["name"]} if ev.get("id") else None  # empty = deleted
                 await repo.set_source(session_id, source)
                 await events.emit(session_id, "session.updated", {"source": source})
-            elif kind == "application_step":
-                app_steps.append({"text": mask_text(ev.get("text", "")), "read_only": bool(ev.get("read_only")),
-                                  "index": ev.get("index")})
             elif kind == "other_thread":
                 # FR-006c: a message for the other participant goes in their thread, with a relay note in the
                 # writer's thread. Without text it is a one-line note for the other thread (news for both).
                 relay_note = (ev.get("relay_note") or "").strip()
                 text = (ev.get("text") or "").strip()
+                posted_other = posted_other or bool(text or relay_note)
                 if text:
                     posted = await messages.add(session_id, speaker="agent", thread=other, text=text, turn_id=turn_id,
                                                 relayed_from=ev.get("relayed_from") or None)
@@ -266,14 +368,19 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                 await tenants.set_status(tenant["_id"], ev.get("status", "credential_rejected"))
             elif kind == "final":
                 reply_text = ev.get("text", "")
+            elif kind == "usage":
+                record_usage(ev, turn_id=turn_id)  # never sent to the browser
             elif kind == "error":
                 await _fail(session_id, message, turn_id, ev.get("message") or "The agent reported an error.")
                 return
+        if not reply_text and posted_other:
+            other_user = await db().users.find_one({"_id": session.get(f"{other}_id")}, projection={"display_name": 1})
+            reply_text = status.passed_on_text((other_user or {}).get("display_name") or "the other participant")
         if not reply_text:
             await _fail(session_id, message, turn_id, "The agent returned no reply.")
             return
-        reply = await messages.add(session_id, speaker="agent", thread=thread, text=reply_text, turn_id=turn_id,
-                                   meta={"application_steps": app_steps} if app_steps else None)
+        await messages.set_reply(reply_doc["_id"], text=reply_text, reply_state="answered", status_text=None)
+        reply = await db().messages.find_one({"_id": reply_doc["_id"]})
         await events.emit(session_id, "agent.message", await messages.public(reply, names) | {"replaces": reply_id})
         await events.emit(session_id, "agent.progress", {"turn_id": turn_id, "thread": thread, "text": None})
         if not wait_set and session.get("waiting_on") == thread:
@@ -285,6 +392,7 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
             await repo.clear_check_order(session_id)
         await messages.set_queue_state(message["_id"], "answered")
         await events.emit(session_id, "message.queue", {"message_id": str(message["_id"]), "queue_state": "answered"})
+        await refresh_waiting_replies(session_id)
         await refresh_suggestions(session_id, agent_suggestions)
     finally:
         turn_id_var.reset(token)
@@ -294,13 +402,24 @@ async def _fail(session_id: ObjectId, message: dict, turn_id: str, reason: str) 
     """Re-queue once, then answer with an error reply in the writer's thread (contracts/live-events.md `turn.failed`)."""
     await events.emit(session_id, "turn.failed", {"turn_id": turn_id, "reason": reason})
     attempts = (message.get("meta") or {}).get("attempts", 0) + 1
+    reply = await messages.reply_for(message["_id"])
     if attempts < 2:
         await db().messages.update_one({"_id": message["_id"]},
                                        {"$set": {"queue_state": "queued", "meta.attempts": attempts}})
         await events.emit(session_id, "message.queue", {"message_id": str(message["_id"]), "queue_state": "queued"})
+        if reply:
+            ahead, text = await queue_status(session_id, message)
+            updated = await messages.set_reply(reply["_id"], reply_state="received", ahead=ahead, status_text=text)
+            if updated:
+                await _reply_status(session_id, updated)
         return
-    reply = await messages.add(session_id, speaker="agent", thread=message.get("thread") or message["speaker"],
-                               turn_id=turn_id, text=f"I couldn't finish that: {reason} Please try again in a moment.")
-    await events.emit(session_id, "agent.message", mask_obj(await messages.public(reply, {})))
+    text = f"I couldn't finish that: {reason} Please try again in a moment."
+    if reply:
+        reply = await messages.set_reply(reply["_id"], text=text, reply_state="failed", status_text=None)
+    else:
+        reply = await messages.add(session_id, speaker="agent", thread=message.get("thread") or message["speaker"],
+                                   turn_id=turn_id, text=text, reply_state="failed")
+    await _reply_status(session_id, reply)  # type: ignore[arg-type]
+    await events.emit(session_id, "agent.message", mask_obj(await messages.public(reply, {})))  # type: ignore[arg-type]
     await messages.set_queue_state(message["_id"], "answered")
     await events.emit(session_id, "message.queue", {"message_id": str(message["_id"]), "queue_state": "answered"})

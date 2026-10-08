@@ -19,7 +19,10 @@ class MessageIn(BaseModel):
 
 
 async def names_for(session: dict) -> dict[str, str]:
+    """Display names of everyone who has held a place in the session, so messages keep their author's name after a
+    handover (FR-033)."""
     ids = [i for i in (session["iam_engineer_id"], session.get("application_owner_id")) if i]
+    ids += [h["from_user_id"] for h in session.get("handovers") or [] if h.get("from_user_id")]
     return {str(u["_id"]): u["display_name"] async for u in db().users.find({"_id": {"$in": ids}})}
 
 
@@ -52,8 +55,11 @@ async def send_message(session_id: str, body: MessageIn,
                                      attachment_ids=attachment_ids, queued=True)
     except messages.MessageError as exc:
         raise error("validation_failed", str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT) from None
-    public = await messages.public(message, await names_for(session))
+    names = await names_for(session)
+    public = await messages.public(message, names)
+    reply = await turns.create_reply(session["_id"], message)  # FR-006h: the reply's status at once
     await events.emit(session["_id"], "message.created", public)
+    await events.emit(session["_id"], "message.created", await messages.public(reply, names))
     await events.emit(session["_id"], "message.queue", {"message_id": public["id"], "queue_state": "queued"})
     turns.kick(session["_id"])
     return public

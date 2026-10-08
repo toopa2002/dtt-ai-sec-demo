@@ -96,9 +96,11 @@ async def test_other_thread_event_posts_a_message_and_a_paired_relay_note(fake_s
         assert [n["text"] for n in notes] == ["Asked the AWS owner to run the read-only get-role check.",
                                               "Posted a message in the application owner's thread."]
         assert notes[0]["relay_ref"] == owner_thread[0]["id"] and notes[1]["relay_ref"] == owner_thread[1]["id"]
-        assert iam_thread[-1]["text"].startswith("The connection check failed") and iam_thread[-1]["kind"] == "message"
+        # The answer sits directly under the order (its reply was created with it, FR-006h), before the turn's notes.
+        assert iam_thread[1]["speaker"] == "agent" and iam_thread[1]["kind"] == "message"
+        assert iam_thread[1]["text"].startswith("The connection check failed") and iam_thread[1]["reply_state"] == "answered"
         created = [e async for e in db().events.find({"session_id": ObjectId(sid), "type": "message.created"})]
-        assert len(created) == 1 + 2 + 2 + 1  # the order + (message, note) + (message, generic note) + owner note
+        assert len(created) == 2 + 2 + 2 + 1  # (order, reply) + (message, note) + (message, generic note) + owner note
         assert all(e["visible_to"] == "both" for e in created)
 
 
@@ -246,3 +248,144 @@ async def test_suggestions_endpoint_is_per_thread(fake_store, isc, fake_agent) -
         updates = [e async for e in db().events.find({"session_id": ObjectId(sid), "type": "suggestions.updated"})]
         assert {e["payload"]["thread"] for e in updates} == {"iam_engineer", "application_owner"}
         assert all(e["visible_to"] != "both" for e in updates)
+
+
+async def test_long_poll_returns_new_events_for_this_viewer_only(fake_store, isc, fake_agent) -> None:  # type: ignore[no-untyped-def]
+    a, b, sid, _ = await _session(fake_store, isc, "threads-poll")
+    async with _both(a, b):
+        after = (await b.get(f"/onboarding/api/sessions/{sid}")).json()["event_seq"]
+        fake_agent.script.append([
+            {"type": "suggestions", "thread": "iam_engineer", "items": [{"text": "Create the connector", "kind": "order"}]},
+            {"type": "final", "text": "hi"}])
+        # The owner's poll waits for the IAM engineer's message, then returns it with the events after `after`.
+        waiting = asyncio.create_task(b.get(f"/onboarding/api/sessions/{sid}/events/poll", params={"after": after}))
+        await asyncio.sleep(0.2)
+        assert not waiting.done()
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "hello owner"})
+        got = (await asyncio.wait_for(waiting, 5)).json()["events"]
+        assert got and got[0]["id"] > after
+        assert any(e["type"] == "message.created" and e["data"]["text"] == "hello owner" for e in got)
+        await _settled(sid)
+        rest = (await b.get(f"/onboarding/api/sessions/{sid}/events/poll", params={"after": after})).json()["events"]
+        assert [e["id"] for e in rest] == sorted(e["id"] for e in rest)
+        # The IAM engineer's suggestions are visible to them only.
+        assert not any(e["type"] == "suggestions.updated" and e["data"]["thread"] == "iam_engineer" for e in rest)
+        mine = (await a.get(f"/onboarding/api/sessions/{sid}/events/poll", params={"after": after})).json()["events"]
+        assert any(e["type"] == "suggestions.updated" and e["data"]["thread"] == "iam_engineer" for e in mine)
+
+
+async def test_every_message_gets_a_status_reply_that_the_answer_replaces(fake_store, isc, fake_agent,  # type: ignore[no-untyped-def]
+                                                                          monkeypatch) -> None:
+    """FR-006h, research R21: the reply exists at once with its status, counts down while others are answered, turns
+    `working` with the progress line, and the answer lands in the same message."""
+    from onboarding_api.agent_client import client as agent_client
+
+    a, b, sid, _ = await _session(fake_store, isc, "threads-status")
+    release = asyncio.Event()
+    started = asyncio.Event()
+    calls: list[str] = []
+
+    async def gated(payload, runtime_session_id):  # type: ignore[no-untyped-def]
+        calls.append(payload["message"]["text"])
+        if len(calls) == 1:
+            started.set()
+            yield {"type": "progress", "text": "checking the source in SailPoint…"}
+            await release.wait()
+        yield {"type": "delta", "text": f"answer to {payload['message']['text']}"}
+        yield {"type": "final", "text": f"answer to {payload['message']['text']}"}
+
+    monkeypatch.setattr(agent_client, "invoke", gated)
+    async with _both(a, b):
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "first"})
+        await asyncio.wait_for(started.wait(), 5)
+        await b.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "second"})
+        await b.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "third"})
+        msgs = await _messages(a, sid)
+        replies = {m["reply_to"]: m for m in msgs if m.get("reply_to")}
+        by_text = {m["text"]: m for m in msgs if m["speaker"] != "agent"}
+        first, second, third = (replies[by_text[t]["id"]] for t in ("first", "second", "third"))
+        assert first["reply_state"] == "working" and first["status_text"].startswith("Working on it: checking")
+        assert second["reply_state"] == "received" and second["ahead"] == 1
+        assert "finishing" in second["status_text"] and "yours is next" in second["status_text"]
+        assert third["reply_state"] == "received" and third["ahead"] == 2 and "2 messages are ahead" in third["status_text"]
+        assert all(m["thread"] == r["thread"] for m, r in ((by_text["second"], second), (by_text["third"], third)))
+        assert not any(m.get("queue_state") == "queued" and m["speaker"] == "agent" for m in msgs)
+        release.set()
+        await _settled(sid)
+        msgs = await _messages(a, sid)
+        for text in ("first", "second", "third"):
+            reply = next(m for m in msgs if m.get("reply_to") == by_text[text]["id"])
+            assert reply["reply_state"] == "answered" and reply["status_text"] is None
+            assert reply["text"] == f"answer to {text}"
+        assert len([m for m in msgs if m["speaker"] == "agent"]) == 3  # one bubble per reply, never a second one
+        # The agent never saw an unanswered reply in its history.
+        assert calls == ["first", "second", "third"]
+        statuses = [e["payload"] async for e in db().events.find({"session_id": ObjectId(sid), "type": "reply.status"})]
+        assert any(p["message_id"] == third["id"] and p["ahead"] == 1 for p in statuses)  # counted down
+
+
+async def test_a_failed_turn_turns_the_status_into_the_error_reply(fake_store, isc, fake_agent) -> None:  # type: ignore[no-untyped-def]
+    a, b, sid, _ = await _session(fake_store, isc, "threads-status-fail")
+    async with _both(a, b):
+        fake_agent.script += [[{"type": "error", "code": "agent_error", "message": "AgentCore timed out."}]] * 2
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "hello"})
+        await _settled(sid)
+        msgs = await _messages(a, sid)
+        assert [(m["speaker"], m.get("reply_state")) for m in msgs] == [("iam_engineer", None), ("agent", "failed")]
+        assert msgs[1]["text"].startswith("I couldn't finish that") and msgs[1]["status_text"] is None
+
+
+async def test_a_turn_that_only_relays_is_filled_with_passed_on(fake_store, isc, fake_agent) -> None:  # type: ignore[no-untyped-def]
+    a, b, sid, _ = await _session(fake_store, isc, "threads-status-relay")
+    async with _both(a, b):
+        fake_agent.script.append([{"type": "other_thread", "text": "Message from the IAM engineer: hi",
+                                   "relay_note": "Passed it on."}])
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "tell the owner hi"})
+        await _settled(sid)
+        reply = next(m for m in await _messages(a, sid) if m.get("reply_to"))
+        assert reply["reply_state"] == "answered" and reply["text"].startswith("Passed on to ")
+
+
+async def test_the_shared_plan(fake_store, isc, fake_agent) -> None:  # type: ignore[no-untyped-def]
+    """FR-008a-c, research R22: seeded at creation, changed by valid ops only, milestones derived from it, the same for
+    both participants, and given to the agent."""
+    a, b, sid, _ = await _session(fake_store, isc, "threads-plan")
+    async with _both(a, b):
+        s_iam = (await a.get(f"/onboarding/api/sessions/{sid}")).json()
+        s_owner = (await b.get(f"/onboarding/api/sessions/{sid}")).json()
+        assert s_iam["plan"] == s_owner["plan"] and s_iam["plan_done"] == 0
+        ids = [p["id"] for p in s_iam["plan"]]
+        assert ids[0] == "check_org" and s_iam["next_step_id"] == "check_org"
+
+        fake_agent.script.append([
+            {"type": "plan", "ops": [{"op": "set_state", "step_id": "check_org", "state": "done"},
+                                     {"op": "set_state", "step_id": "check_role_name", "state": "in_progress"}]},
+            {"type": "plan", "ops": [{"op": "remove", "step_id": "create_role"}]},             # rejected
+            {"type": "plan", "ops": [{"op": "set_state", "step_id": "check_org", "state": "todo"}]},  # no reason
+            {"type": "set_step", "step": "source_created", "state": "in_progress"},
+            {"type": "set_step", "step": "source_created", "state": "passed"},
+            {"type": "final", "text": "Started."}])
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "Go"})
+        await _settled(sid)
+        assert "plan" in fake_agent.calls[-1]["session"] and fake_agent.calls[-1]["session"]["plan"][0]["id"] == "check_org"
+        s = (await b.get(f"/onboarding/api/sessions/{sid}")).json()
+        state = {p["id"]: p["state"] for p in s["plan"]}
+        assert state["check_org"] == "done" and state["check_role_name"] == "in_progress"
+        assert "create_role" in state and state["create_source"] == "done"
+        assert s["steps"]["application_ready"] == "in_progress" and s["steps"]["source_created"] == "passed"
+        assert s["plan_done"] == 2 and s["next_step_id"] == "check_role_name"
+        evs = [e async for e in db().events.find({"session_id": ObjectId(sid)}, sort=[("event_id", 1)])]
+        updates = [e for e in evs if e["type"] == "plan.updated"]
+        assert len(updates) == 3 and all(e["visible_to"] == "both" for e in updates)  # 1 ops + 2 set_step
+        changed = [e["payload"] for e in evs if e["type"] == "step.changed"]
+        assert {"source_created", "application_ready"} <= {c["step"] for c in changed}
+        assert len([c for c in changed if c["step"] == "source_created"]) == 2  # in_progress, then passed
+
+        # A passed connection check: the owner's remaining setup steps count as done, AWS role ready passes.
+        fake_agent.script.append([{"type": "set_step", "step": "application_ready", "state": "passed"},
+                                  {"type": "final", "text": "Connected."}])
+        await a.post(f"/onboarding/api/sessions/{sid}/messages", json={"text": "Check"})
+        await _settled(sid)
+        s = (await a.get(f"/onboarding/api/sessions/{sid}")).json()
+        assert s["steps"]["application_ready"] == "passed"
+        assert all(p["state"] in ("done", "skipped") for p in s["plan"] if p["milestone"] == "application_ready")

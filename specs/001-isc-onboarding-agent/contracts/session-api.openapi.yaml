@@ -76,11 +76,30 @@ components:
             source: { type: [object, 'null'], properties: { id: { type: string }, name: { type: string } } }
             waiting_on: { type: [string, 'null'], enum: [iam_engineer, application_owner, null], description: "Who the agent waits for (information only, FR-006a)" }
             waiting_reason: { type: [string, 'null'], maxLength: 120, description: "The awaited person's next step, for the waiting banner (FR-006g)" }
+            plan: { type: array, items: { $ref: '#/components/schemas/PlanStep' }, description: "The shared plan (FR-008a); the same for both participants" }
+            plan_done: { type: integer, description: "Steps done, of steps not skipped" }
+            plan_total: { type: integer }
+            next_step_id: { type: [string, 'null'] }
+            finished_at: { type: [string, 'null'], format: date-time }
+            reopened_at: { type: [string, 'null'], format: date-time }
             participants:
               type: object
               properties:
                 iam_engineer: { type: object, properties: { id: { type: string }, display_name: { type: string }, online: { type: boolean } } }
                 application_owner: { type: [object, 'null'], properties: { id: { type: string }, display_name: { type: string }, online: { type: boolean } } }
+    PlanStep:
+      type: object
+      required: [id, title, actor, kind, state]
+      properties:
+        id: { type: string }
+        title: { type: string, maxLength: 120 }
+        actor: { type: string, enum: [application_owner, iam_engineer, agent] }
+        kind: { type: string, enum: [read_only, change] }
+        state: { type: string, enum: [todo, in_progress, done, failed, skipped, blocked] }
+        reason: { type: [string, 'null'], maxLength: 160 }
+        milestone: { type: [string, 'null'] }
+        added_by: { type: string, enum: [playbook, agent] }
+        changed_at: { type: string, format: date-time }
     Message:
       type: object
       required: [id, seq, speaker, text, created_at]
@@ -90,7 +109,11 @@ components:
         speaker: { type: string, enum: [iam_engineer, application_owner, agent] }
         speaker_name: { type: string }
         thread: { type: string, enum: [iam_engineer, application_owner], description: "Whose thread; a participant's message is always in their own thread" }
-        kind: { type: string, enum: [message, relay_note] }
+        kind: { type: string, enum: [message, relay_note, system_note] }
+        reply_to: { type: [string, 'null'], description: "On an agent reply: the participant message it answers (FR-006h)" }
+        reply_state: { type: [string, 'null'], enum: [received, working, answered, failed, null] }
+        ahead: { type: [integer, 'null'], description: "While received: messages ahead in the queue" }
+        status_text: { type: [string, 'null'], description: "System-written status shown until the answer streams in" }
         relay_ref: { type: [string, 'null'] }
         relayed_from: { type: [string, 'null'], enum: [iam_engineer, application_owner, null] }
         text: { type: string }
@@ -113,9 +136,23 @@ components:
         action: { type: string, enum: [create_source, configure_source, connection_check, aggregate, test_connection, delete_source] }
         source: { type: [object, 'null'] }
         ordered_by: { type: object, properties: { id: { type: string }, display_name: { type: string } } }
-        result: { type: string, enum: [ok, failed] }
+        trigger: { type: string, enum: [order, application_owner_confirmation] }
+        order_message_id: { type: [string, 'null'] }
+        result: { type: string, enum: [ok, failed, running] }
+        outcome: { type: string, description: 'One line, e.g. "passed · 3 accounts read" (FR-020a)' }
+        request: { type: object, description: "Masked fields and values sent; never credentials. Empty object with request_missing=true on old records" }
+        response:
+          type: object
+          properties:
+            task_ids: { type: array, items: { type: string } }
+            task_states: { type: object, additionalProperties: { type: string } }
+            counts: { type: object, properties: { accounts: { type: integer }, entitlements: { type: integer } } }
+            error: { type: [string, 'null'] }
+        diagnosis: { type: [string, 'null'] }
         error: { type: [string, 'null'] }
         task_ids: { type: array, items: { type: string } }
+        started_at: { type: [string, 'null'], format: date-time }
+        duration_ms: { type: [integer, 'null'] }
         at: { type: string, format: date-time }
     Tenant:
       type: object
@@ -192,7 +229,7 @@ paths:
     get: { summary: Session with participants, steps and source, responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }, '404': { description: Not a participant } } }
   /sessions/{id}/finish:
     parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-    post: { summary: Mark finished (IAM engineer); starts the 90-day retention clock, responses: { '200': { description: OK } } }
+    post: { summary: Mark finished (the session's IAM engineer, FR-031); starts the 90-day retention clock; the session is read-only until an admin reopens it, responses: { '200': { description: OK } } }
   /sessions/{id}/suggestions:
     parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
     get:
@@ -252,7 +289,12 @@ paths:
     delete: { summary: Dismiss a held image (uploader only), responses: { '204': { description: Discarded } } }
   /sessions/{id}/actions:
     parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-    get: { summary: SailPoint action records (FR-020), responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Action' } } } } } } }
+    get: { summary: SailPoint action records (FR-020) with their one-line outcome; the session's IAM engineer only, responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Action' } } } } }, '403': { description: Application owner } } }
+  /sessions/{id}/actions/{actionId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: actionId, in: path, required: true, schema: { type: string } }
+    get: { summary: One action with request, response, diagnosis and context (FR-020a); the session's IAM engineer only, responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }, '403': { description: Application owner }, '404': { description: Not found } } }
   /sessions/{id}/events:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
@@ -261,6 +303,25 @@ paths:
       summary: Live event stream (SSE). Event types in contracts/live-events.md.
       responses: { '200': { description: text/event-stream } }
 
+  /admin/sessions:
+    get:
+      summary: All sessions, open and finished (admin; US8 #1)
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { allOf: [ { $ref: '#/components/schemas/SessionSummary' }, { type: object, properties: { tenant_name: { type: string }, iam_engineer: { type: object }, application_owner: { type: [object, 'null'], description: "{id, display_name, status} — status shows a disabled participant" }, plan_done: { type: integer }, plan_total: { type: integer }, last_activity: { type: string, format: date-time }, expires_at: { type: [string, 'null'], format: date-time } } } ] } } } }
+        '403': { description: Not an admin }
+  /admin/sessions/{id}/reopen:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post: { summary: Reopen a finished session (admin; FR-032) — clears the retention clock, posts a system note in both threads, audited, responses: { '200': { description: Reopened }, '409': { description: Not finished } } }
+  /admin/sessions/{id}/handover:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      summary: Hand a participant's place to another user (admin; FR-033). Applied at once, or when the running turn ends.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [place, user_id], properties: { place: { $ref: '#/components/schemas/Role' }, user_id: { type: string } } } } } }
+      responses:
+        '200': { description: 'Applied ({"applied": true}) or pending until the running answer ends ({"applied": false})' }
+        '422': { description: 'Target disabled, wrong role, already holds the other place, or is the current holder' }
   /admin/users:
     get: { summary: List accounts (admin), responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/User' } } } } }, '403': { description: Not an admin } } }
     post:

@@ -712,6 +712,412 @@ right wording and clears within 2 s; with 200 seeded messages per thread nothing
 
 ---
 
+## Revision 2026-10-08: status replies, plan, owner view, timeline sync, action details, reopen and handover
+
+The spec's 2026-10-08 sessions (FR-006, FR-006h, FR-006i, FR-008a-c, FR-020, FR-020a, FR-031-FR-033; US3 scenarios
+10-16, US6 scenario 4, US8; SC-014-SC-018), the updated design canvas and plan research R21-R26. Tasks T134-T173.
+They replace the bare "queued" label (T101), the owner's step list rebuilt from reply metadata (T058), and the
+application-step agent tools.
+
+---
+
+## Phase 17: Revision 3 foundation (blocks Phases 18-22)
+
+**Purpose**: the data shapes, event addressing and plan/action stores every later phase uses.
+
+- [X] T134 Address one-person events by role in `onboarding/api/src/onboarding_api/chat/events.py` (research R24):
+  `visible(event, user_id, role)` accepts `visible_to` = `"both"`, `"role:iam_engineer"`, `"role:application_owner"`
+  (matched against the viewer's current role in the session) or a user id; update both callers in
+  `onboarding/api/src/onboarding_api/chat/stream.py` (`stream` and `poll`) to pass the role from
+  `participant_session`; emit `suggestions.updated` with the role form (in `onboarding/api/src/onboarding_api/chat/turns.py`
+  / `chat/suggestions.py`). `attachment.held` keeps the uploader's user id.
+- [X] T135 [P] Extend messages in `onboarding/api/src/onboarding_api/chat/messages.py`: `add()` accepts `kind`
+  `"message" | "relay_note" | "system_note"`, `reply_to` (ObjectId), `reply_state` (`"received" | "working" |
+  "answered" | "failed"`, agent replies only), `ahead` (int, while received), `status_text`; the API serialiser
+  (around `speaker_name`, line ~107) returns them (contracts/session-api.openapi.yaml `Message`); add
+  `set_reply(message_id, **fields)` that updates only those fields. Add the fields to `Message` in
+  `onboarding/web/src/app/shared/models.ts`.
+- [X] T136 [P] Write the starting plan `onboarding/catalog/playbooks/aws-saas/plan.yaml` (contracts/connector-playbook.md):
+  ordered steps `{id, title, actor, kind, milestone, setup_step?}` for the AWS SaaS flow, ported from the order of
+  `setup.md` and `.claude/skills/sailpoint-isc-aws-connector/scripts/aws-setup.sh` then `isc-source.sh`: check
+  Organizations and trusted access (owner, read_only, application_ready), check the role name is free (owner,
+  read_only), create role/trust/read-only policies (owner, change), discovery permissions if chosen (owner, change),
+  IAM engineer's order (iam_engineer), create source (agent, source_created), configure (agent, configured),
+  connection check (agent, connection_check), aggregation (agent, aggregation), Test Connection (agent,
+  test_connection), confirm the role from CloudTrail (owner, read_only). In
+  `onboarding/catalog/playbooks/aws-saas/checks.yaml` add `plan_step` per milestone (the step its `set_step` marks).
+  Load `plan.yaml` in the API's catalog loader (`onboarding/api/src/onboarding_api/catalog/`) and the agent's
+  `onboarding/agent/src/onboarding_agent/playbooks.py`.
+- [X] T137 Create `onboarding/api/src/onboarding_api/sessions/plan.py` (research R22, data-model PlanStep):
+  `seed(playbook)` → PlanStep list (`state: "todo"`, `added_by: "playbook"`, `changed_at`); `apply_ops(plan, ops)`
+  validating exactly: ops `set_state {step_id, state, reason?}`, `add {after, title, actor, kind, milestone?,
+  reason}`, `skip {step_id, reason}`; `state` ∈ `todo | in_progress | done | failed | skipped | blocked`; "steps are
+  never removed"; "`reason` … required for added, skipped, blocked and failed steps and for leaving `done`"; title
+  "≤ 120 chars, masked", reason "≤ 160 chars, masked"; plan "ordered, ≤ 40"; added ids `x1`, `x2`…; raises a
+  `PlanError` naming the bad op. `derive_milestones(plan)`: per milestone "any failed → failed; all done or skipped →
+  passed; any done or in progress → in_progress; else not_started". `progress(plan)` → `(done, total, next_step_id)`
+  where "Count shown = steps `done` of steps not `skipped`; next step = first step not `done`/`skipped`".
+- [X] T138 Wire the plan into sessions in `onboarding/api/src/onboarding_api/sessions/repo.py` and `routes.py`: seed
+  `plan` on create from the connector's playbook; `set_plan(session_id, plan)` stores it, re-derives `steps` and
+  returns the milestones that changed; session GET `full()` returns `plan`, `plan_done`, `plan_total`,
+  `next_step_id`, `finished_at`, `reopened_at` (contracts/session-api.openapi.yaml `Session`). Add `PlanStep` and the
+  fields to `onboarding/web/src/app/shared/models.ts`.
+- [X] T139 Migrate existing sessions once in `onboarding/api/src/onboarding_api/db.py` (like research R18): a session
+  without `plan` gets the seeded plan, with each milestone's `plan_step` set from `steps` (`passed` → done, `failed` →
+  failed, `in_progress` → in_progress) and earlier owner steps done when `application_ready` passed; idempotent.
+- [X] T140 Extend action records in `onboarding/api/src/onboarding_api/audit/actions.py` (research R24, data-model
+  `actions`): `record()` takes `action_ref`, `request` (fallback: an old `request_summary`), `response`
+  `{task_ids, task_states, counts{accounts?, entitlements?}, error?}`, `started_at`, `duration_ms`,
+  `order_message_id`; masks request, response and error; upserts by `(turn_id, action_ref)` (add index
+  `{turn_id: 1, action_ref: 1}` unique sparse in `db.py`); computes `outcome` ("passed · 3 accounts read",
+  "failed · " + the error's first line, "running"); returns whether it was an insert or an update.
+  `set_diagnosis(turn_id, text)` attaches "≤ 1,000 chars, masked" text to the turn's last failed action. The
+  serialiser returns every field, and "not recorded" markers (`request_missing`, `response_missing`) for old records.
+- [X] T141 [P] Unit tests: `onboarding/api/tests/unit/test_plan.py` (seed from the AWS playbook; each op; every
+  rejection rule above; milestone derivation table; `progress` with skipped steps) and
+  `onboarding/api/tests/unit/test_actions.py` (outcome strings; running → ok upsert keeps one record; masking of
+  request/response/diagnosis; old record markers).
+
+**Checkpoint**: unit tests pass; a new session shows a plan in its GET; old sessions migrate on start.
+
+---
+
+## Phase 18: User Story 3 (revision 3) - Status replies instead of "queued" (Priority: P2)
+
+**Goal**: every message gets the agent's reply bubble within 1 s with a status, which the answer replaces in place.
+
+**Independent Test**: quickstart §3b step 1 on the dev stack.
+
+### Tests
+
+- [X] T142 [P] [US3] Extend `onboarding/api/tests/integration/test_threads.py` (FR-006h): posting returns the message
+  and creates one agent reply in the same thread with `reply_to`, `reply_state: "received"`, `ahead`, `status_text`;
+  with a turn running, a second participant's reply says it is next and a third has `ahead: 2`; when its turn starts
+  the reply is `working`; the streamed and final text land in the reply's id and it ends `answered` with
+  `status_text` null; a failing agent (after the retry) leaves it `failed` with the error text; a turn with only an
+  `other_thread` output fills it with "Passed on to <name>."; `reply.status` events are emitted when `ahead` changes;
+  replies not `answered` are not in the agent's `history`.
+- [X] T143 [P] [US3] Write `onboarding/web/e2e/status-replies.spec.ts` (two browsers, stub): while the agent answers
+  the IAM engineer, the owner sends a message; within 1 s an agent bubble under it reads "Received" and names who is
+  first, on both screens; no element on either screen contains "queued"; the bubble becomes the answer without a
+  second bubble; three quick messages show 2, 1, 0 ahead in turn.
+
+### Implementation
+
+- [X] T144 [US3] Create `onboarding/api/src/onboarding_api/chat/status.py`: `received_text(ahead, first)` — "Received.
+  I'm finishing <first>'s question first; yours is next." (first = the other participant's name, or "your earlier
+  message") or "Received. <n> messages are ahead of yours."; `working_text(progress)` — "Working on it: <progress>" or
+  "Working on it…"; `passed_on_text(name)`. English only, each string in one table so Thai can be added (research R12).
+- [X] T145 [US3] In `onboarding/api/src/onboarding_api/chat/routes.py` (POST messages, lines ~51-58): create the agent
+  reply right after the participant message (`ahead` = queued or processing messages before it in the session queue)
+  and emit `message.created` for both, then `turns.kick()`. The finished-session 409 stays.
+- [X] T146 [US3] In `onboarding/api/src/onboarding_api/chat/turns.py`: when a turn starts, set its reply `working`
+  and emit `reply.status`; recompute `ahead` for replies still `received` and emit `reply.status` for each that
+  changed (also after each turn ends); `progress` outputs also set the working reply's `status_text`; `agent.delta`
+  and the `final` output use the reply's id (the existing draft id is replaced); `final` sets text, `reply_state:
+  "answered"`, clears `status_text`; no writer-thread text → `passed_on_text`; `_fail` (lines ~291-306) after the
+  retry sets `failed` with the error text; build `history` without replies that are not `answered`. Event order per
+  contracts/live-events.md.
+- [X] T147 [US3] Browser: in `onboarding/web/src/app/shared/live-stream.service.ts` handle `reply.status` (update the
+  message's `reply_state`, `ahead`, `status_text`) and let `agent.delta` append to the existing reply; in
+  `onboarding/web/src/app/shared/thread.component.ts` render a reply that is `received`/`working`/`failed` as the
+  canvas's status bubble (dashed border, inline icon, bold lead "Received." / "Working on it:", `role="status"`) and
+  remove the `queued` / `agent is answering` labels (lines ~45-46) and the separate progress line where the reply now
+  carries it. Strings via `$localize`.
+
+**Checkpoint**: quickstart §3b step 1 passes; `threads.spec.ts` and `shared-session.spec.ts` still pass.
+
+---
+
+## Phase 19: User Story 3 (revision 3) - The shared plan (Priority: P2)
+
+**Goal**: both people see one plan of the whole onboarding, kept current by the agent; the header follows it.
+
+**Independent Test**: quickstart §3b step 2 on the dev stack (stub `happy` and `trust` scenarios).
+
+### Tests
+
+- [X] T148 [P] [US3] Extend `onboarding/api/tests/integration/test_threads.py`: a new session's GET has the seeded plan
+  with `plan_done: 0`; a `plan` output with valid ops updates it and emits `plan.updated` (both participants); an
+  invalid op (remove, leaving `done` without a reason, a 41st step) is rejected and logged without touching the plan;
+  a `set_step` output marks the milestone's `plan_step` and emits `step.changed` only when the derived milestone
+  changes; the agent payload carries `plan`.
+- [X] T149 [P] [US3] Write `onboarding/agent/tests/unit/test_plan_tools.py`: `update_plan` emits one `plan` event with
+  the ops; ops without a required reason are refused by the tool with a message the model can act on.
+- [X] T150 [P] [US3] Add an eval case to `onboarding/agent/tests/evals/` ("What is left to do?" mid-session in the
+  `trust` scenario): the answer names exactly the plan's not-done steps, in order (FR-008b).
+
+### Implementation
+
+- [X] T151 [US3] Agent: add `update_plan(ops)` to `onboarding/agent/src/onboarding_agent/tools/session.py` and its
+  spec to `TOOL_SPECS` in `onboarding/agent/src/onboarding_agent/loop.py`; render the current plan (id, title, actor,
+  state, reason) into the turn's context from `payload["session"]["plan"]`; retire `record_application_step` and
+  `mark_application_in_progress` (their work is `update_plan` now). In
+  `onboarding/agent/src/onboarding_agent/prompts/en/system.md`: keep the plan current before the final text; add a
+  step with a reason when a fix or extra check is needed, assigned to who must do it; mark later checks `blocked`
+  with a reason while they wait; never remove a step; answer "what is left?" from the plan.
+- [X] T152 [US3] API: in `onboarding/api/src/onboarding_api/chat/turns.py` handle the `plan` output via
+  `sessions/plan.apply_ops` + `repo.set_plan` → `plan.updated {plan, done, total, next_step_id}` and `step.changed`
+  per changed milestone; route `set_step` to the milestone's `plan_step` (state map: in_progress → in_progress,
+  passed → done, failed → failed) the same way; drop the `application_step` / `meta.application_steps` handling
+  (lines ~189, 236-238, 276); add `plan` to the agent payload.
+- [X] T153 [US3] Browser: create `onboarding/web/src/app/shared/plan-panel.component.ts` (inputs `plan`,
+  `viewerRole`, `names`) per the canvas: heading "Plan" with "x of y done", a progress bar, one row per step with a
+  state icon (done, failed, in progress = next, blocked, to do, skipped), its number and title, the reason line for
+  added/blocked/failed/skipped steps, and an actor tag ("You" for the viewer's role, else "Owner"/"IAM engineer"/
+  "Agent"); the next step highlighted; on the application owner's screen a "Your next step" card at the top when the
+  next step is theirs. `live-stream.service.ts`: a `plan` signal from the session load/resync and `plan.updated`. In
+  `onboarding/web/src/app/session/session-screen.component.ts` show the panel on both screens and remove the "Your
+  steps in AWS" list and its rebuild-from-messages logic (lines ~91-108, 181-192).
+
+**Checkpoint**: quickstart §3b step 2 passes; the header chips and the plan never disagree.
+
+---
+
+## Phase 20: User Story 3 (revision 3) - Owner's own-thread view and time-synced threads (Priority: P2)
+
+**Goal**: the owner sees only their own conversation; the IAM engineer's two threads show the same moment.
+
+**Independent Test**: quickstart §3b steps 3 and 4 on the dev stack.
+
+### Tests
+
+- [X] T154 [P] [US3] Write `onboarding/web/e2e/owner-view-sync.spec.ts`: owner screen has one message box, the own
+  thread full width and a button "IAM engineer ↔ Agent (hidden)" with `aria-expanded="false"`; Show opens the IAM
+  thread view only; reload collapses it; no SailPoint actions panel. IAM screen with `smoke.py --seed --messages 120`:
+  both logs show the same divider times; scrolling one log to a divider brings the other's top item within one message
+  of that time; "Sync by time" toggled off survives a reload and stops the coupling; at 1000 px wide sync is off.
+
+### Implementation
+
+- [X] T155 [US3] Owner layout in `onboarding/web/src/app/session/session-screen.component.ts` and `.css` (research
+  R25): the owner's own thread full width; below it a collapsed bar (real `<button>`, `aria-expanded`,
+  `aria-controls`) that shows the IAM engineer's thread view only when opened; the open state is a component signal,
+  never stored, so every load starts collapsed. Remove the SailPoint actions panel from the owner screen, and in
+  `live-stream.service.ts` skip the actions request for the application owner.
+- [X] T156 [US3] Create `onboarding/web/src/app/shared/time-sync.ts` (research R26): `dividers(threadA, threadB)` →
+  distinct local `HH:MM` minutes with a message in either thread; per thread, runs of dividers with no messages
+  collapse into one "No messages from HH:MM to HH:MM" line; `TimeSync` pairs two log elements: on a user scroll
+  (ignore scroll events it caused, via a guard flag) throttled to one `requestAnimationFrame`, read the top visible
+  item's time (`data-ts`) and scroll the other log so its last item at or before that time is at the top; when the
+  scrolled log is at the bottom, both stick to the bottom.
+- [X] T157 [US3] Wire it: `onboarding/web/src/app/shared/thread.component.ts` takes optional `dividers` and renders
+  them and `data-ts` on each item, and exposes its log element; on the IAM screen in `session-screen.component.ts` add
+  the "Sync by time" `<button aria-pressed>` in the Conversations header, on by default, stored in `localStorage` under
+  `onboarding.sync.<userId>` inside try/catch, and off below 1100 px (`matchMedia`).
+
+**Checkpoint**: quickstart §3b steps 3-4 pass; `waiting-scroll.spec.ts` still passes.
+
+---
+
+## Phase 21: User Story 3 (revision 3) - SailPoint action details (Priority: P2)
+
+**Goal**: each action shows its outcome, and opens to the request sent and the response received; IAM engineer only.
+
+**Independent Test**: quickstart §3b step 5 on the dev stack (stub `trust` scenario).
+
+### Tests
+
+- [X] T158 [P] [US3] Extend `onboarding/agent/tests/unit/test_isc_tools.py`: each ISC tool emits one `action` with
+  `action_ref`, masked `request` (no credential, no token), `response`, `started_at`, `duration_ms`; aggregation emits
+  `running` then the final result with the same `action_ref`; `note_diagnosis` emits a `diagnosis` event.
+- [X] T159 [P] [US3] Write `onboarding/api/tests/integration/test_action_details.py`: the owner gets 403 on
+  `GET /sessions/{id}/actions` and `/actions/{actionId}`; the IAM engineer gets the list with `outcome` and the detail
+  with request, response, diagnosis, `order_message_id`; running → ok gives one record and an `action.updated`
+  event; `action.*` events are not delivered to the owner's stream or long-poll; after an IAM-place handover the new
+  engineer sees them.
+
+### Implementation
+
+- [X] T160 [US3] Agent: in `onboarding/agent/src/onboarding_agent/isc/tools.py` change `_action` (lines ~43-46) to
+  emit `action_ref` (e.g. `a1`, `a2` per turn), `request`, `response` `{task_ids, task_states, counts, error}`,
+  `started_at`, `duration_ms`; fill them per tool (create: name, connector; configure: the field names and values
+  set; connection check: `counts.accounts`; aggregation: send `running` before waiting, then the final with task
+  states and counts; Test Connection: result and error). Add `note_diagnosis(text)` to `tools/session.py` and
+  `TOOL_SPECS`; prompt: after diagnosing a failed SailPoint action, call it once.
+- [X] T161 [US3] API: `onboarding/api/src/onboarding_api/chat/turns.py` passes `action` outputs to
+  `actions.record` with `order_message_id` = the turn's message and emits `action.recorded` or `action.updated`
+  (`visible_to: "role:iam_engineer"`), and `diagnosis` outputs to `actions.set_diagnosis` → `action.updated`; in
+  `onboarding/api/src/onboarding_api/audit/routes.py` make the list IAM engineer only (403) and add
+  `GET /sessions/{id}/actions/{actionId}`.
+- [X] T162 [US3] Browser: action rows in `session-screen.component.ts` become buttons showing the one-line outcome;
+  create `onboarding/web/src/app/shared/action-dialog.component.ts` per the canvas (native `<dialog>` with
+  `showModal()`, closes on Escape, the close button and a backdrop click; sections Context (ordered by, why, "Show in
+  thread" scrolls the IAM log to `order_message_id`), Request, Response, Agent's diagnosis; "not recorded" for missing
+  parts; "Copy details" copies the masked text); `live-stream.service.ts` handles `action.updated`; add
+  `action(id, actionId)` to `api.service.ts`.
+
+**Checkpoint**: quickstart §3b step 5 passes; leak scan finds nothing in `actions`.
+
+---
+
+## Phase 22: User Story 8 - Admin reopens a session or hands it to another person (Priority: P2)
+
+**Goal**: finished or orphaned sessions can be resumed by the right people without losing history.
+
+**Independent Test**: quickstart §3b steps 6 and 7 on the dev stack.
+
+### Tests
+
+- [X] T163 [P] [US8] Write `onboarding/api/tests/integration/test_admin_sessions.py`: non-admins get 403; the list
+  has every session with participants (a disabled one marked), status, plan counts, last activity; reopen of an open
+  session is 409; reopen clears `finished_at`/`expires_at` on the session, its messages, events and attachments,
+  posts a `system_note` in both threads and records `session_reopened`; handover to a disabled user, a user with the
+  other role, the holder of the other place, or the current holder is 422; a valid handover swaps the id, appends
+  `handovers`, clears `check_order` for the IAM place, posts notes, records `session_handover`, and the previous user
+  then gets 404 on the session while the new one reads the full history with the old author names; with `turn_lock`
+  held it returns `applied: false` and is applied right after the turn.
+- [X] T164 [P] [US8] Write `onboarding/web/e2e/admin-sessions.spec.ts`: the IAM engineer finishes a session, both
+  screens become read-only with "an admin can reopen it"; the admin reopens it from Admin → Sessions and both can
+  write; the admin hands the owner's place to a second owner while the first has the session open: the first is sent
+  to their session list within 2 s and no longer lists it; the second sees the history and the plan.
+
+### Implementation
+
+- [X] T165 [US8] Add `reopen(session_id, admin)`, `request_handover(session_id, place, user_id, admin)` and
+  `apply_pending_handover(session_id)` to `onboarding/api/src/onboarding_api/sessions/repo.py` per research R23 and
+  the data-model rules ("an active user with that role who does not hold the other place"; `handovers` entries
+  `{place, from_user_id, to_user_id, admin_id, at}`; `pending_handover` while `turn_lock` is held); system notes in
+  both threads through `chat/messages.add(kind="system_note")`; audit kinds `session_reopened` and
+  `session_handover` (detail `{session_id, place, from_user_id, to_user_id}`) in
+  `onboarding/api/src/onboarding_api/audit/audit.py`.
+- [X] T166 [US8] Endpoints in `onboarding/api/src/onboarding_api/auth/admin_routes.py`: `GET /admin/sessions`,
+  `POST /admin/sessions/{id}/reopen`, `POST /admin/sessions/{id}/handover` (contracts/session-api.openapi.yaml);
+  emit `session.updated {status, reopened_at}`, `participant.changed`, and `access.revoked` addressed to the
+  previous user's id.
+- [X] T167 [US8] Apply a pending handover in `onboarding/api/src/onboarding_api/chat/turns.py` right after a turn's
+  `suggestions.updated` and lock release; in `onboarding/api/src/onboarding_api/chat/stream.py` re-check participation
+  on `participant.changed` and end the previous user's stream and long-poll after sending them `access.revoked`.
+- [X] T168 [P] [US6] Finished state in the browser: `session-screen.component.ts` shows "This session is finished. An
+  admin can reopen it." instead of the message boxes and suggestions when `status` is finished, and returns to the
+  live layout on `session.updated` with status open; `live-stream.service.ts` handles `participant.changed` (names,
+  presence) and `access.revoked` (navigate to the session list with a notice).
+- [X] T169 [US8] Admin screen in `onboarding/web/src/app/admin/admin.component.ts` per the canvas: a Sessions table
+  (session, connector · tenant, IAM engineer, application owner with a "disabled" mark, status with "deleted in N
+  days" for finished ones, plan "x of y", last activity), Reopen for finished sessions, and Hand over opening an
+  inline form (place select, a user select listing only active users with that role and not the other place's holder,
+  an explanation line, Cancel / Hand over) that shows the API's 422 reason; methods in
+  `onboarding/web/src/app/shared/api.service.ts`.
+
+**Checkpoint**: quickstart §3b steps 6-7 pass.
+
+---
+
+## Phase 23: Revision 3 polish
+
+- [X] T170 [P] Update `docs/DEMO-GUIDE.md` §8.3 and `onboarding/README.md`: status replies, the plan, the owner's
+  hidden IAM thread, "Sync by time", action details, and admin reopen and handover.
+- [X] T171 Run the full checks: `uv run pytest` and `ruff check` in `onboarding/api` and `onboarding/agent`,
+  `make onboarding-evals` (the gate runs only if prompts changed since its last pass, Constitution IV; SC-005 must
+  stay ≥ 9/10, plus T150), and `make onboarding-e2e` on the scripted model (all specs, including T143, T154, T164).
+- [X] T172 Rebuild and roll out: `make onboarding-images`, `kubectl -n onboarding rollout restart
+  deploy/onboarding-api`, redeploy the agent code to AgentCore, then `make onboarding-leak-scan` (now including
+  `actions.request`, `actions.response`, `actions.diagnosis` and plan text).
+- [ ] T173 Through the public URL on the cluster, run quickstart §3b steps 1-7 and record the results in
+  `specs/001-isc-onboarding-agent/checklists/quickstart-run.md`.
+
+---
+
+## Revision 2026-10-08 (2): constitution v1.0.0 compliance (cost-bounded AI use)
+
+Constitution Principle IV and plan research R27-R29, after the 2026-10-07 Bedrock spend (about $36 in one day, mostly
+three full eval runs). No user-visible change. Tasks T174-T186. **Run Phase 24 before Phases 18-23**: their tests and
+T171 then cost nothing (it does not depend on Phase 17).
+
+---
+
+## Phase 24: Cost-bounded AI use (cross-cutting; before Phases 18-23)
+
+**Purpose**: no paid model calls in automated runs by default, cached prompts for every real call, and evals that
+state their cost and skip when nothing changed.
+
+**Independent Test**: `make onboarding-e2e` passes with Bedrock's `Invocations` metric unchanged; a
+`REAL_MODEL=1` single-spec run shows `model_cache_read_tokens` > 0 from the second model call of a turn;
+`make onboarding-evals` twice in a row calls the model only the first time.
+
+### Tests
+
+- [X] T174 [P] Write `onboarding/agent/tests/unit/test_prompt_cache.py` (research R27): with a recording fake client
+  passed to `loop.run_turn`, the request has `cache_control: {"type": "ephemeral"}` on the last tool definition, on
+  the static system block (first of two system blocks) and on the last content block of the conversation in every
+  round; no more than 4 breakpoints; the static block is identical for two different sessions of the same connector
+  and role; one `usage` event per turn sums `calls`, `input_tokens`, `cache_write_tokens`, `cache_read_tokens`,
+  `output_tokens` over the rounds.
+- [X] T175 [P] Write `onboarding/agent/tests/unit/test_fake_model.py` (research R28): `AGENT_MODEL=fake` with
+  `ONBOARDING_ISC_BASE_URL` not pointing at `127.0.0.1`/`localhost` raises at start; the scripted model answers an
+  IAM "create the connector" message with the create, configure and check tool calls; in the `trust` scenario it
+  answers the failed check with `post_to_other_thread`, `set_waiting` and (after T151) `update_plan`; an unmatched
+  message gets a short fixed reply, never an error.
+- [X] T176 [P] Write `onboarding/agent/tests/unit/test_eval_runner.py` (research R29): the fingerprint changes when a
+  file under `prompts/` or `catalog/playbooks/` or an eval case changes, or the model id changes, and not otherwise;
+  `--estimate` prints calls and dollars and makes no model call; a gate with an unchanged fingerprint and a passing
+  `.run/evals-gate.json` exits 0 without calling the model; `--force` runs.
+
+### Implementation
+
+- [X] T177 Prompt caching in `onboarding/agent/src/onboarding_agent/loop.py` (research R27): split `system_prompt()`
+  into `static_system(pb)` (the rules of `prompts/en/system.md` that do not depend on the turn, plus the playbook's
+  `setup.md`, `failures.md`, `collisions.md`) and `dynamic_system(payload, pb)` (writer, role gate, session values,
+  plan, waiting, check order); pass `system=[{static, cache_control}, {dynamic}]`; put `cache_control` on the last tool
+  of `tools` and on the last content block of `messages` before each `messages.stream` call (removing the previous
+  round's message breakpoint so at most 4 exist); read `usage` from each final message and emit one
+  `{"type": "usage", …}` event at the end of `run_turn`. Move any turn-specific wording out of `system.md`'s cached
+  part into the dynamic block.
+- [X] T178 [P] Record usage in the API: in `onboarding/api/src/onboarding_api/chat/turns.py` handle the `usage` output
+  by calling `record_metric` (`onboarding/api/src/onboarding_api/metrics.py`) for `model_calls`,
+  `model_input_tokens`, `model_cache_read_tokens`, `model_cache_write_tokens`, `model_output_tokens`
+  (contracts/agent-invocation.md); never emit it to the browser.
+- [X] T179 Create the scripted model `onboarding/agent/src/onboarding_agent/fake_model.py` and
+  `onboarding/agent/tests/fake_model/script.yaml` (research R28): a client with async `messages.stream(...)` (an async
+  context manager yielding `content_block_delta` text events and `get_final_message()`) and `messages.create(...)`,
+  matching the attributes `loop.run_turn` and `loop.secret_check` read (`content` blocks with `type`, `text`,
+  `name`, `input`, `id`; `usage`). Rules: ordered `{when: {role?, text_matches?, has_source?, step_states?,
+  last_tool_result_matches?}, then: [{text}|{tool, input}]}`; tool results feed back so multi-round turns work. Write
+  rules for every message the e2e specs and `smoke.py` scenarios send (read `onboarding/web/e2e/*.spec.ts`,
+  `e2e/helpers.ts` and `onboarding/deploy/scripts/smoke.py`): create and run the checks, owner setup Q&A and pasted
+  output, the trust diagnosis (other thread + relay + waiting), the owner's "I have finished… the role is ready"
+  confirmation rerun, relaying "tell the IAM engineer…", declining an owner's SailPoint order, suggestions via
+  `suggest_replies`, "what is left?". `secret_check` passes images unless the file name contains `secret`.
+- [X] T180 Select the model in `onboarding/agent/src/onboarding_agent/main.py`: `AGENT_MODEL=fake` builds the scripted
+  client and passes it to `loop.run_turn` / `loop.secret_check`; refuse to start with `fake` unless
+  `ONBOARDING_ISC_BASE_URL` is a local address; log the model in use at start. The AgentCore build
+  (`onboarding/deploy/scripts/agent-deploy.sh`) never sets `AGENT_MODEL`.
+- [X] T181 Scripts: `onboarding/deploy/scripts/dev.sh` takes `AGENT_MODEL` (default `bedrock`) and restarts the agent
+  when it differs from the running one (store it next to the pid file); `onboarding/deploy/scripts/e2e.sh` starts the
+  stack with `AGENT_MODEL=fake` unless `REAL_MODEL=1`, and when it is set prints "Real Claude Haiku on Bedrock: about
+  N model calls, about $X" (N from the number of specs × a per-spec constant) before running;
+  `onboarding/deploy/scripts/smoke.py --scenario` prints the same kind of banner when the agent it talks to is real
+  (ask the agent's `/ping`, which T180 makes report the model).
+- [X] T182 Evals in `onboarding/agent/tests/evals/run_evals.py` and `onboarding/deploy/scripts/evals.sh` (research
+  R29): default `--runs 3`; `--gate` = 10 runs with the 9/10 pass rule; `--estimate`; `--force`; print the estimate
+  (cases × runs × average calls per turn × tokens, Haiku 4.5 list prices with cache read/write rates kept as
+  constants next to the model id) before calling the model and the actual calls, tokens and cost after (from the
+  `usage` events); fingerprint = SHA-256 over `onboarding/agent/src/onboarding_agent/prompts/`,
+  `onboarding/catalog/playbooks/`, `loop.py`, the eval case files and the model id; a passing gate writes
+  `{fingerprint, result, at}` to `.run/evals-gate.json`. `make onboarding-evals` in `Makefile` runs `evals.sh --gate`.
+- [X] T183 [P] Makefile help: mark `onboarding-evals` "(paid: Bedrock, prints estimate; skipped when unchanged)",
+  `onboarding-e2e` "(scripted model, free; REAL_MODEL=1 for Bedrock)", `onboarding-dev` "(real Claude Haiku: paid per
+  message)".
+
+### Polish
+
+- [X] T184 [P] Docs: a "What costs money" section in `onboarding/README.md` and `docs/DEMO-GUIDE.md` §8 (which
+  commands call Bedrock, rough cost per run with caching, the scripted model, `REAL_MODEL=1`, the eval gate skip) and
+  how the account owner sets an AWS Budgets alarm on Bedrock spend (a monthly budget with an 80% alert; not run by
+  any script here).
+- [X] T185 Run the checks: `uv run pytest` and `ruff check` in `onboarding/agent` and `onboarding/api`; `make
+  onboarding-e2e` on the scripted model (all specs pass; note Bedrock `Invocations` before and after: unchanged);
+  then once `REAL_MODEL=1 ./onboarding/deploy/scripts/e2e.sh e2e/threads.spec.ts` and confirm the API metrics show
+  `model_cache_read_tokens` > 0.
+- [X] T186 Run `make onboarding-evals` once (prints the estimate; the prompt changed in T177, so the gate runs; SC-005
+  ≥ 9/10), record calls, tokens and cost in `specs/001-isc-onboarding-agent/checklists/quickstart-run.md`, run it
+  again and confirm it skips; redeploy the agent to AgentCore (`make onboarding-agent` code update) so production
+  calls are cached too.
+
+**Checkpoint**: the Independent Test above passes; Constitution IV holds for this feature.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -736,6 +1142,22 @@ right wording and clears within 2 s; with 200 seeded messages per thread nothing
 - **Phase 15 (US3 revision 2)**: tests T123–T125 first (T125 needs T122); T126 → T127 → T128 (the banner sits in
   the thread); T129 alongside T127.
 - **Phase 16**: after Phase 15; T132 before T133.
+- **Phase 17 (revision 3 foundation)**: needs Phases 14-16. T134, T135, T136 in parallel; T136 → T137 → T138 → T139;
+  T140 alongside; T141 after T137 and T140. Blocks Phases 18-22.
+- **Phase 18 (status replies)**: tests T142, T143 first; T144 → T145 → T146 → T147.
+- **Phase 19 (plan)**: tests T148-T150 first; T151 (agent) and T152 (API) in parallel; T153 after T152. Can run in
+  parallel with Phase 18 except both touch `chat/turns.py` (T146, T152): do those two in sequence.
+- **Phase 20 (owner view, sync)**: browser only; needs T135/T138 for the models; T155 and T156 in parallel, T157
+  after T156. Independent of Phases 18, 19, 21.
+- **Phase 21 (action details)**: tests T158, T159 first; T160 (agent) and T161 (API, after T134 and T140) in
+  parallel; T162 after T161. `chat/turns.py` again: after T146/T152.
+- **Phase 22 (US8)**: tests T163, T164 first; T165 → T166 → T167 (T167 also edits `chat/turns.py`, last of them);
+  T168 and T169 after T166.
+- **Phase 23**: after Phases 18-22; T172 before T173.
+- **Phase 24 (cost-bounded AI use)**: independent of Phase 17; **run it before Phases 18-23** so their tests use the
+  scripted model. Tests T174-T176 first; T177 → T178 (usage event); T179 → T180 → T181; T182 after T177 (usage);
+  T183, T184 any time; T185 → T186 last. T179's script gains rules for new behaviour as later phases add it (T151
+  `update_plan`, T160 `note_diagnosis`).
 
 ### Within each story
 
@@ -791,6 +1213,20 @@ Task: "T051 Session creation flow in onboarding/web/src/app/session/new-session.
 1. Phase 14 → check one wait end to end (reason in the event, on reload, auto-clear).
 2. Phase 15 → **stop and validate** quickstart §3a steps 7–8 on the dev stack.
 3. Phase 16 → full checks, roll out the single container and the agent, validate through the public URL.
+
+### Revision 3 delivery (T134-T173)
+
+1. Phase 17 → check a new session's plan in the API and an old session's migration.
+2. Phase 18 → **stop and validate** quickstart §3b step 1 (the most visible fix: no more bare "queued").
+3. Phase 19 → validate step 2; Phase 20 → steps 3-4; Phase 21 → step 5; Phase 22 → steps 6-7. Each is shippable on
+   its own after Phase 17.
+4. Phase 23 → full checks, roll out the container and the agent, validate through the public URL.
+
+### Revision 4 delivery (T174-T186, cost)
+
+1. Phase 24 first: caching (T177) is the biggest saving for real use; the scripted model (T179-T181) makes every
+   later e2e run free.
+2. Validate: default e2e leaves Bedrock untouched; one real run shows cache reads; the eval gate skips when unchanged.
 
 ### Notes
 

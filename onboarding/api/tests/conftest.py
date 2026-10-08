@@ -1,6 +1,7 @@
 """Integration fixtures: a throwaway MongoDB (ONB_TEST_MONGO_URI, default the local test container on :27018), the app
 over ASGI, SailPoint mocked with respx, AgentCore Identity and the agent runtime replaced by fakes."""
 
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -45,6 +46,7 @@ class FakeAgent:
         self.script: list[list[dict]] = []
 
     async def invoke(self, payload, runtime_session_id):  # type: ignore[no-untyped-def]
+        json.dumps(payload)  # the real client sends JSON: a payload that can't be serialised must fail here too
         self.calls.append(payload)
         if payload.get("mode") == "secret_check":
             import base64

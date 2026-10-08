@@ -8,7 +8,9 @@ someone else (FR-018, SC-007).
 
 import asyncio
 import re
+import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -37,13 +39,28 @@ class IscTools:
         self.emit = emit
         self.poll_seconds = poll_seconds
         self.poll_limit = poll_limit
+        self._refs = 0
 
     # ---------------------------------------------------------------- helpers
+    def _begin(self) -> dict[str, Any]:
+        """Start an action record: its ref (unique in the turn) and start time (research R24)."""
+        self._refs += 1
+        return {"ref": f"a{self._refs}", "t0": time.monotonic(),
+                "started_at": datetime.now(UTC).isoformat(timespec="seconds")}
+
     async def _action(self, action: str, result: str, *, source: dict | None = None, error: str | None = None,
-                      request_summary: dict | None = None, task_ids: list[str] | None = None) -> None:
-        await self.emit({"type": "action", "action": action, "source": source or self.session.get("source"),
-                         "result": result, "error": error, "request_summary": request_summary or {},
-                         "task_ids": task_ids or [], "trigger": self.trigger})
+                      request: dict | None = None, counts: dict | None = None, task_ids: list[str] | None = None,
+                      task_states: dict | None = None, started: dict | None = None) -> None:
+        """One action event: what was sent (`request`, never credentials) and what SailPoint returned (`response`).
+        A `running` action is sent again with the same ref when it ends (FR-020, FR-020a)."""
+        started = started or self._begin()
+        await self.emit({
+            "type": "action", "action_ref": started["ref"], "action": action,
+            "source": source or self.session.get("source"), "result": result, "request": request or {},
+            "response": {"task_ids": list(task_ids or []), "task_states": dict(task_states or {}),
+                         "counts": dict(counts or {}), "error": error},
+            "error": error, "task_ids": list(task_ids or []), "trigger": self.trigger, "started_at": started["started_at"],
+            "duration_ms": None if result == "running" else int((time.monotonic() - started["t0"]) * 1000)})
 
     async def _step(self, step: str, state: str) -> None:
         await self.emit({"type": "set_step", "step": step, "state": state})
@@ -118,6 +135,7 @@ class IscTools:
         details = self.session["details"]
         name = details["source_name"]
         await self._step("source_created", "in_progress")
+        started = self._begin()
         existing = await self.find_source(name)
         if existing["exists"]:
             if existing["created_in_this_session"]:
@@ -125,7 +143,8 @@ class IscTools:
                 return {"created": False, "reused": True, "id": existing["id"], "name": name}
             await self._step("source_created", "failed")
             await self._action("create_source", "failed", source={"id": existing["id"], "name": name},
-                               error=f"A source named '{name}' already exists and belongs to {existing['owner']}.")
+                               error=f"A source named '{name}' already exists and belongs to {existing['owner']}.",
+                               request={"name": name}, started=started)
             return {"created": False, "owned_by": existing["owner"], "id": existing["id"],
                     "instruction": "Do not reuse or change it. Ask the IAM engineer for a different source name."}
         settings = self.pb.settings
@@ -144,7 +163,8 @@ class IscTools:
         except (IscError, ValueError, KeyError) as exc:
             await self._step("source_created", "failed")
             await self._action("create_source", "failed", source={"id": "", "name": name}, error=str(exc),
-                               request_summary={"name": name, "connector": settings.get("connector_script")})
+                               request={"name": name, "connector": settings.get("connector_script"),
+                                        "owner": details.get("source_owner")}, started=started)
             return {"created": False, "error": str(exc)}
         source = {"id": created["id"], "name": created.get("name", name)}
         self.session["source"] = source
@@ -152,8 +172,9 @@ class IscTools:
         await self._step("source_created", "passed")
         instance = ((created.get("connectorAttributes") or {}).get("spConnectorInstanceId"))
         await self._action("create_source", "ok", source=source,
-                           request_summary={"name": name, "connector": settings["connector_script"],
-                                            "spConnectorSpecId": spec_id, "external_id_set": bool(ext)})
+                           request={"name": name, "connector": settings["connector_script"],
+                                    "owner": details.get("source_owner"), "spConnectorSpecId": spec_id,
+                                    "external_id_set": bool(ext)}, started=started)
         return {"created": True, **source, "connector_instance_linked": bool(instance)}
 
     def _settings_values(self) -> dict[str, Any]:
@@ -186,6 +207,8 @@ class IscTools:
         if not source:
             return {"configured": False, "error": "no source has been created in this session yet"}
         await self._step("configured", "in_progress")
+        started = self._begin()
+        values: dict[str, Any] = {}
         try:
             values = self._settings_values()
             ext = (await self.get_tenant_external_id())["external_id"]
@@ -196,10 +219,11 @@ class IscTools:
             await self.isc.patch_json(f"/v3/sources/{quote(source['id'])}", ops)
         except (IscError, ValueError) as exc:
             await self._step("configured", "failed")
-            await self._action("configure_source", "failed", error=str(exc))
+            await self._action("configure_source", "failed", error=str(exc), request={"fields": values},
+                               started=started)
             return {"configured": False, "error": str(exc)}
         await self._step("configured", "passed")
-        await self._action("configure_source", "ok", request_summary={"fields": sorted(values)})
+        await self._action("configure_source", "ok", request={"fields": values}, started=started)
         return {"configured": True, "fields": sorted(values)}
 
     async def peek_accounts(self) -> dict:
@@ -210,23 +234,26 @@ class IscTools:
             return {"ok": False, "error": "no source has been created in this session yet"}
         check = (self.pb.checks.get("connection_check") or {})
         await self._step("connection_check", "in_progress")
+        started = self._begin()
+        request = {"objectType": check.get("object_type", "account"), "maxCount": check.get("max_count", 5)}
         try:
             result = await self.isc.post(f"/beta/sources/{quote(source['id'])}/connector/peek-resource-objects",
-                                         json={"objectType": check.get("object_type", "account"),
-                                               "maxCount": check.get("max_count", 5)})
+                                         json=request)
         except IscError as exc:
             await self._step("connection_check", "failed")
-            await self._action("connection_check", "failed", error=str(exc))
+            await self._action("connection_check", "failed", error=str(exc), request=request, started=started)
             return {"ok": False, "error": str(exc)}
         objects = result.get("resourceObjects") or []
         if not objects:
             detail = str(result.get("details") or result)[:800]
             await self._step("connection_check", "failed")
-            await self._action("connection_check", "failed", error=detail)
+            await self._action("connection_check", "failed", error=detail, request=request, counts={"accounts": 0},
+                               started=started)
             return {"ok": False, "error": detail}
         await self._step("connection_check", "passed")
         await self._step("application_ready", "passed")
-        await self._action("connection_check", "ok", request_summary={"accounts_read": len(objects)})
+        await self._action("connection_check", "ok", request=request, counts={"accounts": len(objects)},
+                           started=started)
         return {"ok": True, "accounts_read": len(objects),
                 "sample": [o.get("identity") or o.get("name") for o in objects][:5]}
 
@@ -245,6 +272,9 @@ class IscTools:
         sid = quote(source["id"])
         await self._step("aggregation", "in_progress")
         await self.emit({"type": "progress", "text": "aggregating accounts in SailPoint… (this can take minutes)"})
+        started = self._begin()
+        entitlements = bool((self.pb.checks.get("aggregation") or {}).get("entitlements", True))
+        request = {"accounts": True, "entitlements": entitlements, "disableOptimization": True}
         task_ids: list[str] = []
         try:
             acct = await self.isc.post(f"/beta/sources/{sid}/load-accounts", content="disableOptimization=true",
@@ -252,25 +282,32 @@ class IscTools:
             acct_id = (acct.get("task") or {}).get("id") or acct.get("id")
             if acct_id:
                 task_ids.append(acct_id)
-            if (self.pb.checks.get("aggregation") or {}).get("entitlements", True):
+            await self._action("aggregate", "running", request=request, task_ids=task_ids, started=started)
+            if entitlements:
                 ent = await self.isc.post(f"/beta/sources/{sid}/load-entitlements", content="")
                 ent_id = (ent.get("task") or {}).get("id") or ent.get("id")
                 if ent_id:
                     task_ids.append(ent_id)
+            if entitlements:
+                await self._action("aggregate", "running", request=request, task_ids=task_ids, started=started)
             results = [await self._wait(t) for t in task_ids]
         except IscError as exc:
             await self._step("aggregation", "failed")
-            await self._action("aggregate", "failed", error=str(exc), task_ids=task_ids)
+            await self._action("aggregate", "failed", error=str(exc), request=request, task_ids=task_ids,
+                               started=started)
             return {"ok": False, "error": str(exc), "task_ids": task_ids}
         failed = [r for r in results if r["completion_status"] not in ("SUCCESS", "WARNING")]
         if failed:
             error = "; ".join(f"{r['id']}: {r['completion_status']} {' '.join(map(str, r['messages']))}" for r in failed)
             await self._step("aggregation", "failed")
-            await self._action("aggregate", "failed", error=error, task_ids=task_ids)
+            await self._action("aggregate", "failed", error=error, request=request, task_ids=task_ids,
+                               task_states={r["id"]: str(r["completion_status"]) for r in results}, started=started)
             return {"ok": False, "error": error, "task_ids": task_ids}
         accounts = await self.isc.get(f"/v3/accounts?filters={_q(f'sourceId eq \"{source["id"]}\"')}&limit=250")
         await self._step("aggregation", "passed")
-        await self._action("aggregate", "ok", task_ids=task_ids, request_summary={"accounts": len(accounts or [])})
+        await self._action("aggregate", "ok", request=request, task_ids=task_ids,
+                           task_states={r["id"]: str(r["completion_status"]) for r in results},
+                           counts={"accounts": len(accounts or [])}, started=started)
         return {"ok": True, "task_ids": task_ids, "accounts_on_source": len(accounts or [])}
 
     async def test_connection(self) -> dict:
@@ -278,20 +315,21 @@ class IscTools:
         if not source:
             return {"ok": False, "error": "no source has been created in this session yet"}
         await self._step("test_connection", "in_progress")
+        started = self._begin()
         try:
             result = await self.isc.post(f"/beta/sources/{quote(source['id'])}/connector/test-configuration")
         except IscError as exc:
             await self._step("test_connection", "failed")
-            await self._action("test_connection", "failed", error=str(exc))
+            await self._action("test_connection", "failed", error=str(exc), started=started)
             return {"ok": False, "error": str(exc)}
         status = str(result.get("status", ""))
         if "SUCCESS" in status:
             await self._step("test_connection", "passed")
-            await self._action("test_connection", "ok")
+            await self._action("test_connection", "ok", task_states={"status": status}, started=started)
             return {"ok": True, "status": status}
         detail = str(result.get("details") or result)[:800]
         await self._step("test_connection", "failed")
-        await self._action("test_connection", "failed", error=detail)
+        await self._action("test_connection", "failed", error=detail, task_states={"status": status}, started=started)
         hint = (self.pb.checks.get("test_connection") or {}).get("before_aggregation_hint")
         return {"ok": False, "status": status, "error": detail, "hint": hint if "req.input" in detail else None}
 

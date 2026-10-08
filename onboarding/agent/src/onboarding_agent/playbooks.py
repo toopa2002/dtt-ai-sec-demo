@@ -24,6 +24,7 @@ class Playbook:
     failures: str
     collisions: str
     suggestions: dict[str, Any] = field(default_factory=dict)   # suggestions.yaml: per role, per state (FR-006e)
+    plan: list[dict[str, Any]] = field(default_factory=list)    # plan.yaml: the starting plan (FR-008b)
     values: dict[str, Any] = field(default_factory=dict)
 
     def render(self, text: str) -> str:
@@ -63,6 +64,7 @@ def load(type_id: str) -> Playbook:
         checks=yaml.safe_load(read("checks.yaml") or "{}") or {},
         failures=read("failures.md"), collisions=read("collisions.md"),
         suggestions=yaml.safe_load(read("suggestions.yaml") or "{}") or {},
+        plan=(yaml.safe_load(read("plan.yaml") or "{}") or {}).get("steps", []),
     )
 
 

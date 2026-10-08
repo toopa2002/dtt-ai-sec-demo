@@ -572,19 +572,26 @@ there instead of rerunning `make tunnel`.
 | Step | Who | What to show |
 |---|---|---|
 | 1 | IAM engineer | **Catalog**: AWS SaaS available, the planned types listed. **Start a session**: tenant, application owner, source name, management account, member accounts, regions. |
-| 2 | Application owner | Opens the session from **Sessions**. Each screen shows **Conversations**: the person's own thread (message box plus 3–5 suggested replies) and the other person's thread, live but **View only**. Picks the suggestion "What do I need to set up in AWS first?" The agent answers in the owner's thread with copy-ready AWS CLI steps, values filled in (External ID, role name, account IDs). |
+| 2 | Application owner | Opens the session from **Sessions**. The **Plan** panel shows every step of the onboarding with who does it and "x of y done" (the same on both screens), with a **Your next step** card. The owner sees **only their own thread**; the IAM engineer's thread sits in a collapsed bar ("IAM engineer ↔ Agent (hidden) · Show") they can open, view only. Picks the suggestion "What do I need to set up in AWS first?" The agent answers in the owner's thread with copy-ready AWS CLI steps, values filled in (External ID, role name, account IDs), and marks step 1 in progress in the plan. |
 | 3 | Application owner | Asks the agent to create the connector. It declines: only the IAM engineer orders SailPoint changes. Pasting an `AKIA…` key shows it masked on both screens. Suggestions never offer the owner a SailPoint order. |
-| 4 | IAM engineer | Picks "Create the connector and run the checks". Status chips update live on both screens, **SailPoint actions** records each change with who ordered it. |
-| 5 | Both | If the trust is wrong, the connection check fails: the diagnosis (**Side: AWS**, the quoted error) is in the IAM engineer's thread, the read-only check and then the fix go to the owner **in the owner's thread**, and a one-line **relay note** in the IAM engineer's thread says what was asked. An amber **waiting banner** with a clock appears above the message box in all four threads: the owner sees "Waiting for you: <next step>", the IAM engineer "Waiting for <owner>: <next step>"; it is information only, so the IAM engineer can still write and is answered at once, and it disappears as soon as the owner answers. Each thread's messages scroll in their own area; scroll up to read and a **New messages** button offers the jump back down. Paste the error or upload a screenshot; screenshots that show secrets are held for the uploader only. |
+| 4 | IAM engineer | The IAM engineer's screen shows both threads side by side, **in step by time**: scrolling one brings the other to the same moment, with the same minute dividers ("Sync by time" turns it off). Picks "Create the connector and run the checks". The plan and the status chips update live on both screens; **SailPoint actions** records each change with its one-line outcome; **click a row** for the request the agent sent, SailPoint's response and the agent's diagnosis. |
+| 5 | Both | Write while the agent is busy: the agent's reply appears at once with a **status** ("Received. I'm finishing …'s question first; yours is next"), which the answer then replaces in place; nothing is ever just "queued". If the trust is wrong, the connection check fails: the diagnosis (**Side: AWS**) is in the IAM engineer's thread, the read-only check and then the fix go to the owner **in the owner's thread** with a **relay note** for the IAM engineer, and the plan gains a "Fix the role's trust" step for the owner with the later checks **blocked**. An amber **waiting banner** names who the agent waits for and what to do; it is information only. Each thread scrolls in its own area with a **New messages** button. Screenshots that show secrets are held for the uploader only. |
 | 6 | Application owner | Picks "Done, I applied the fix". The checks rerun **without a new order**: the IAM engineer's order stands, and the action records name the IAM engineer as "rerun after the application owner confirmed a fix". The results land in the IAM engineer's thread with a note in the owner's. |
-| 7 | IAM engineer | Aggregation and Test Connection pass. **Finish** the session; it stays readable for 90 days. |
+| 7 | IAM engineer | Aggregation and Test Connection pass; the plan shows what is left (the CloudTrail confirmation). **Finish** the session: both screens become read-only and say an admin can reopen it. |
+| 8 | Admin | **Admin → Sessions** lists every session. **Reopen** the finished one (both can write again; a note in both threads), or **Hand over** a place to another person with the same role: the previous person is taken out of the session at once, the new one sees the full history and the plan. |
 
 ### 8.4 Run and test without the cluster
 
 `make onboarding-dev` runs the whole stack on this machine against the ISC stub, with the agent calling the real
-Claude Haiku on Bedrock through your AWS credentials. `make onboarding-e2e` (two-browser Playwright run, then the
-leak scan), `make onboarding-evals` (failure diagnosis, SC-005) and `make onboarding-leak-scan` are described in
-[`onboarding/README.md`](../onboarding/README.md#run-it-locally-without-a-cluster).
+Claude Haiku on Bedrock through your AWS credentials (`AGENT_MODEL=fake` for the free scripted model).
+`make onboarding-e2e` (two-browser Playwright run on the scripted model, then the leak scan), `make onboarding-evals`
+(the SC-005 failure-diagnosis gate on Bedrock, skipped when nothing changed) and `make onboarding-leak-scan` are
+described in [`onboarding/README.md`](../onboarding/README.md#run-it-locally-without-a-cluster).
+
+**What costs money** (Constitution IV): only real Claude Haiku calls. The e2e and smoke runs are free on the scripted
+model; the eval gate costs about $4 and runs only when prompts, playbooks, tools, cases or the model change; using the
+app costs about $0.02 per message with prompt caching. Table, estimates and the AWS Budgets alarm:
+[`onboarding/README.md`](../onboarding/README.md#what-costs-money).
 
 ### 8.5 Teardown
 

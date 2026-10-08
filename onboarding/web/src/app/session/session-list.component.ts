@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AuthService } from '../auth/auth.service';
 import { ApiService, apiError } from '../shared/api.service';
 import { SessionSummary, STEP_KEYS } from '../shared/models';
@@ -16,6 +16,9 @@ import { SessionSummary, STEP_KEYS } from '../shared/models';
         @if (isIam()) { <a class="button primary" routerLink="/catalog" i18n="@@sessions.new">New session</a> }
       </header>
       @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+      @if (left()) {
+        <p class="notice" role="status" i18n="@@sessions.left">An admin handed your place in that session to someone else, so it is no longer in your list.</p>
+      }
       @for (group of groups(); track group.label) {
         <h2>{{ group.label }}</h2>
         @for (s of group.items; track s.id) {
@@ -32,6 +35,7 @@ import { SessionSummary, STEP_KEYS } from '../shared/models';
     </div>
   `,
   styles: `
+    .notice { padding: 0.6rem 0.9rem; border-radius: 8px; background: var(--aws-fill); border: 1px solid var(--info); }
     .wrap { max-width: 64rem; margin: 0 auto; padding: 1.5rem; width: 100%; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
     h1 { margin: 0; font-size: 1.4rem; }
@@ -50,6 +54,8 @@ export class SessionListComponent implements OnInit {
   private readonly auth = inject(AuthService);
   protected readonly sessions = signal<SessionSummary[]>([]);
   protected readonly error = signal<string | null>(null);
+  /** Arrived here because an admin handed this person's place over (FR-033). */
+  protected readonly left = signal(!!inject(ActivatedRoute).snapshot.queryParamMap.get('left'));
   protected readonly isIam = computed(() => this.auth.me()?.role === 'iam_engineer');
   protected readonly groups = computed(() => [
     {

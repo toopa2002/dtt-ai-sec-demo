@@ -10,8 +10,10 @@ import os
 from collections.abc import AsyncIterator
 
 from bedrock_agentcore import BedrockAgentCoreApp
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
-from . import loop, playbooks
+from . import fake_model, loop, playbooks
 from .isc.client import IscClient, IscError, agentcore_token_fn
 from .isc.tools import IscTools
 from .tools.session import SessionTools
@@ -20,6 +22,22 @@ log = logging.getLogger("onboarding_agent")
 app = BedrockAgentCoreApp()
 REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
 REQUIRED = ("turn_id", "ordered_by", "session", "message")
+# Constitution IV (research R28): `fake` = the scripted model, for the local dev stack against the ISC stub only;
+# the AgentCore image never sets AGENT_MODEL, so production always uses Claude Haiku on Bedrock.
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "bedrock")
+if AGENT_MODEL == "fake":
+    fake_model.check_allowed(os.environ.get("ONBOARDING_ISC_BASE_URL"))
+MODEL = fake_model.FakeModel() if AGENT_MODEL == "fake" else None  # None: loop builds the Bedrock client
+log.warning("agent model: %s", "scripted (fake)" if MODEL else os.environ.get(
+    "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"))
+
+
+async def model_info(_: Request) -> JSONResponse:
+    """Which model this agent uses, so scripts can say whether a run costs money (Constitution IV)."""
+    return JSONResponse({"model": "fake" if MODEL else "bedrock"})
+
+
+app.add_route("/model", model_info, methods=["GET"])
 
 
 def _isc(tenant: dict, workload_name: str | None = None) -> IscClient:
@@ -41,7 +59,7 @@ async def _run_turn(payload: dict, emit) -> None:  # type: ignore[no-untyped-def
         thread = payload.get("message", {}).get("thread") or role
         tools = IscTools(isc, pb, session, emit,
                          trigger="order" if role == "iam_engineer" else "application_owner_confirmation")
-        await loop.run_turn(payload, pb, tools, SessionTools(emit, thread), emit)
+        await loop.run_turn(payload, pb, tools, SessionTools(emit, thread), emit, claude=MODEL)
     finally:
         await isc.close()
 
@@ -68,7 +86,7 @@ async def invoke(payload: dict, context=None) -> AsyncIterator[dict]:  # type: i
     mode = payload.get("mode", "turn")
     if mode == "secret_check":
         try:
-            yield await loop.secret_check(payload)
+            yield await loop.secret_check(payload, claude=MODEL)
         except Exception as exc:  # noqa: BLE001 — fail closed: an unchecked image is held
             log.warning("secret check failed: %s", type(exc).__name__)
             yield {"type": "secret_check", "result": "held", "reason": "The image could not be checked."}

@@ -106,7 +106,15 @@ async def test_aggregation_waits_for_tasks(isc, isc_mock, pb, emit) -> None:  # 
     tools = IscTools(isc, pb, sample_session(source={"id": sid, "name": "n"}), emit, poll_seconds=0)
     result = await tools.start_aggregation()
     assert result == {"ok": True, "task_ids": ["t1", "t2"], "accounts_on_source": 3}
-    assert emit.of("action")[0]["task_ids"] == ["t1", "t2"]
+    acts = emit.of("action")
+    # T158 (research R24): `running` first, then the final result under the same ref, with task states and counts.
+    assert [a["result"] for a in acts] == ["running", "running", "ok"]
+    assert len({a["action_ref"] for a in acts}) == 1
+    assert acts[0]["task_ids"] == ["t1"] and acts[0]["duration_ms"] is None
+    final = acts[-1]
+    assert final["task_ids"] == ["t1", "t2"] and final["response"]["task_states"] == {"t1": "SUCCESS", "t2": "SUCCESS"}
+    assert final["response"]["counts"] == {"accounts": 3} and isinstance(final["duration_ms"], int)
+    assert final["request"]["entitlements"] is True and final["started_at"]
 
 
 async def test_test_connection_before_aggregation_gives_hint(isc, isc_mock, pb, emit) -> None:  # type: ignore[no-untyped-def]
@@ -145,3 +153,30 @@ async def test_owner_lookup_survives_sailpoint_500(isc, isc_mock, pb, emit, monk
     assert lookup.call_count == 2 and search.called
     assert json.loads(search.calls.last.request.content)["indices"] == ["identities"]
     assert json.loads(create.calls.last.request.content)["owner"] == {"type": "IDENTITY", "id": "b" * 32}
+
+
+async def test_every_action_carries_its_request_response_and_timing(isc, isc_mock, pb, emit) -> None:  # type: ignore[no-untyped-def]
+    """T158: request (no credentials), response with counts or the error, action_ref, start and duration."""
+    sid = "2c91808a" * 4
+    isc_mock.post(f"/beta/sources/{sid}/connector/peek-resource-objects").respond(
+        200, json={"resourceObjects": [{"identity": "alice"}, {"identity": "bob"}, {"identity": "carol"}]})
+    isc_mock.post(f"/beta/sources/{sid}/connector/test-configuration").respond(400, json={"messages": [
+        {"text": "req.input is null"}]})
+    tools = IscTools(isc, pb, sample_session(source={"id": sid, "name": "n"}), emit)
+    await tools.peek_accounts()
+    await tools.test_connection()
+    peek, test = emit.of("action")
+    assert peek["action_ref"] != test["action_ref"]
+    assert peek["request"] == {"objectType": "account", "maxCount": 5} and peek["response"]["counts"] == {"accounts": 3}
+    assert test["result"] == "failed" and "req.input" in test["response"]["error"]
+    for a in (peek, test):
+        assert a["started_at"] and isinstance(a["duration_ms"], int)
+        assert "token" not in str(a["request"]).lower() and "secret" not in str(a["request"]).lower()
+
+
+async def test_configure_records_the_values_sent(isc, isc_mock, pb, emit) -> None:  # type: ignore[no-untyped-def]
+    sid = "2c91808a" * 4
+    isc_mock.patch(f"/v3/sources/{sid}").respond(200, json={})
+    await IscTools(isc, pb, sample_session(source={"id": sid, "name": "n"}), emit).configure_source()
+    [a] = emit.of("action")
+    assert a["result"] == "ok" and "SailPointISCRole-acme-demo" in str(a["request"]["fields"])

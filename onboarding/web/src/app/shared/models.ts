@@ -84,6 +84,13 @@ export interface Session extends SessionSummary {
   /** Last live-event id when this snapshot was read: the stream resumes after it. */
   event_seq: number;
   participants: { iam_engineer: Person | null; application_owner: Person | null };
+  /** The shared plan (FR-008a) with its count and next step. */
+  plan?: PlanStep[];
+  plan_done?: number;
+  plan_total?: number;
+  next_step_id?: string | null;
+  finished_at?: string | null;
+  reopened_at?: string | null;
 }
 
 export interface Attachment {
@@ -101,7 +108,25 @@ export interface ApplicationStep {
 export type Speaker = Role | 'agent';
 export type QueueState = 'queued' | 'processing' | 'answered' | null;
 
-export type MessageKind = 'message' | 'relay_note';
+export type MessageKind = 'message' | 'relay_note' | 'system_note';
+
+/** The agent reply's state while it waits or is being written (FR-006h, research R21). */
+export type ReplyState = 'received' | 'working' | 'answered' | 'failed' | null;
+
+export type PlanState = 'todo' | 'in_progress' | 'done' | 'failed' | 'skipped' | 'blocked';
+
+/** One step of the shared plan (FR-008a, data-model PlanStep). */
+export interface PlanStep {
+  id: string;
+  title: string;
+  actor: Role | 'agent';
+  kind: 'read_only' | 'change';
+  state: PlanState;
+  reason: string | null;
+  milestone: StepKey | null;
+  added_by: 'playbook' | 'agent';
+  changed_at: string;
+}
 
 export interface Message {
   id: string;
@@ -112,11 +137,18 @@ export interface Message {
   kind: MessageKind;
   speaker: Speaker;
   speaker_name: string;
+  /** Who wrote it; after a handover (FR-033) the earlier holder's messages are not the viewer's own. */
+  speaker_user_id?: string | null;
   relay_ref: string | null;
   relayed_from: Role | null;
   text: string;
   masked: boolean;
   queue_state: QueueState;
+  /** On an agent reply: the participant message it answers, its state, messages ahead and the status text. */
+  reply_to?: string | null;
+  reply_state?: ReplyState;
+  ahead?: number | null;
+  status_text?: string | null;
   attachments: Attachment[];
   application_steps?: ApplicationStep[];
   created_at: string;
@@ -131,9 +163,24 @@ export interface Action {
   ordered_by: { id: string; display_name: string };
   /** Why it ran: the IAM engineer's order, or a check rerun after the application owner confirmed a fix (FR-016a). */
   trigger: 'order' | 'application_owner_confirmation';
-  result: 'ok' | 'failed';
+  result: 'ok' | 'failed' | 'running';
+  /** One line, e.g. "passed · 3 accounts read" (FR-020a). */
+  outcome?: string;
+  order_message_id?: string | null;
+  request?: Record<string, unknown>;
+  request_missing?: boolean;
+  response?: {
+    task_ids?: string[];
+    task_states?: Record<string, string>;
+    counts?: { accounts?: number; entitlements?: number };
+    error?: string | null;
+  };
+  response_missing?: boolean;
+  diagnosis?: string | null;
   error: string | null;
   task_ids: string[];
+  started_at?: string | null;
+  duration_ms?: number | null;
   at: string;
 }
 
@@ -170,4 +217,21 @@ export interface Suggestions {
   thread: Role;
   for_event_id: number;
   items: Suggestion[];
+}
+
+/** One row of the admin's Sessions table (US8, FR-002). */
+export interface AdminSession {
+  id: string;
+  title: string;
+  connector_type: string;
+  status: 'open' | 'finished';
+  tenant_name: string;
+  iam_engineer: { id: string; display_name: string; username: string; status: string } | null;
+  application_owner: { id: string; display_name: string; username: string; status: string } | null;
+  plan_done: number;
+  plan_total: number;
+  last_activity: string;
+  expires_at: string | null;
+  reopened_at: string | null;
+  pending_handover: boolean;
 }

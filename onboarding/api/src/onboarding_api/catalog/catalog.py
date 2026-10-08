@@ -94,6 +94,40 @@ def suggestion_defaults(type_id: str) -> dict[str, dict[str, list[dict[str, str]
     return out
 
 
+PLAN_ACTORS = ("application_owner", "iam_engineer", "agent")
+PLAN_KINDS = ("read_only", "change")
+MILESTONES = ("application_ready", "source_created", "configured", "connection_check", "aggregation",
+              "test_connection")
+
+
+@lru_cache
+def plan_template(type_id: str) -> list[dict[str, Any]]:
+    """`playbooks/<id>/plan.yaml` (FR-008b, research R22): the starting plan. Fails fast on a bad step."""
+    connector = get(type_id)
+    if not connector or not connector.get("playbook"):
+        return []
+    path = settings().catalog_dir / connector["playbook"] / "plan.yaml"
+    steps = (yaml.safe_load(path.read_text()) or {}).get("steps", []) if path.exists() else []
+    ids = set()
+    for step in steps:
+        if (not step.get("id") or step["id"] in ids or step.get("actor") not in PLAN_ACTORS
+                or step.get("kind") not in PLAN_KINDS or step.get("milestone") not in (None, *MILESTONES)
+                or not str(step.get("title", "")).strip()):
+            raise CatalogError(f"{type_id} plan: bad step {step!r}")
+        ids.add(step["id"])
+    return steps
+
+
+@lru_cache
+def plan_steps_by_milestone(type_id: str) -> dict[str, str]:
+    """`checks.yaml` `plan_step`: which plan step a milestone's set_step marks."""
+    connector = get(type_id)
+    if not connector or not connector.get("playbook"):
+        return {}
+    path = settings().catalog_dir / connector["playbook"] / "checks.yaml"
+    return dict((yaml.safe_load(path.read_text()) or {}).get("plan_step") or {}) if path.exists() else {}
+
+
 def _as_list(value: Any) -> list[str]:
     if value is None or value == "":
         return []

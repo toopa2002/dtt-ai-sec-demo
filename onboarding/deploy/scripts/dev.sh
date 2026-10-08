@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the whole onboarding stack locally against the ISC stub (no cluster, no AgentCore deploy):
-#   MongoDB (docker, :27018) · ISC stub (:8099) · agent (:8092, real Claude Haiku on Bedrock with your AWS credentials)
+#   MongoDB (docker, :27018) · ISC stub (:8099) · agent (:8092: AGENT_MODEL=bedrock (default) = real Claude Haiku on
+#   Bedrock with your AWS credentials, paid per message; AGENT_MODEL=fake = the scripted model, free, for tests)
 #   · session API (:8080) · web dev server (:4300 -> http://127.0.0.1:4300/onboarding/)
 #   dev.sh start | public | stop | status     (public: build the web app, which the API then serves, and forward
 #   :8091 -> the API for the shared edge / ngrok /onboarding/)
@@ -33,8 +34,9 @@ case "${1:-start}" in
     step "ISC stub :8099"
     start_bg stub "$ONB_ROOT/deploy/stub-isc" uv run --project "$ONB_ROOT/api" -q uvicorn stub_isc:app --port 8099
     wait_http http://127.0.0.1:8099/_stub/state; ok "stub"
-    step "Agent :8092 (Claude Haiku on Bedrock, model ${BEDROCK_MODEL_ID:-default})"
-    start_bg agent "$ONB_ROOT/agent" env PORT=8092 AWS_REGION="${AWS_REGION:-ap-southeast-1}" \
+    if [[ "${AGENT_MODEL:-bedrock}" == fake ]]; then step "Agent :8092 (scripted model: no Bedrock calls)"
+    else step "Agent :8092 (Claude Haiku on Bedrock, model ${BEDROCK_MODEL_ID:-default}: paid per message)"; fi
+    start_bg agent "$ONB_ROOT/agent" env PORT=8092 AWS_REGION="${AWS_REGION:-ap-southeast-1}" AGENT_MODEL="${AGENT_MODEL:-bedrock}" \
       BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-}" ONBOARDING_ISC_BASE_URL=http://127.0.0.1:8099 ONBOARDING_ISC_TOKEN=stub-token \
       CATALOG_DIR="$ONB_ROOT/catalog" uv run -q python -m onboarding_agent.main
     wait_http http://127.0.0.1:8092/ping; ok "agent"

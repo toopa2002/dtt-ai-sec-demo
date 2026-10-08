@@ -8,6 +8,7 @@ from bson import ObjectId
 from ..config import settings
 from ..db import db
 from ..masking import mask_text
+from . import plan as plans
 
 STEPS = ("application_ready", "source_created", "configured", "connection_check", "aggregation", "test_connection")
 STATES = ("not_started", "in_progress", "passed", "failed")
@@ -33,7 +34,8 @@ def check_transition(step: str, old: str, new: str) -> None:
 
 
 async def create(*, title: str, connector_type: str, tenant_id: ObjectId, details: dict[str, Any],
-                 iam_engineer_id: ObjectId, application_owner_id: ObjectId | None) -> dict:
+                 iam_engineer_id: ObjectId, application_owner_id: ObjectId | None,
+                 plan: list[dict[str, Any]] | None = None) -> dict:
     now = datetime.now(UTC)
     doc = {
         "title": title,
@@ -43,6 +45,7 @@ async def create(*, title: str, connector_type: str, tenant_id: ObjectId, detail
         "iam_engineer_id": iam_engineer_id,
         "application_owner_id": application_owner_id,
         "steps": {s: {"state": "not_started", "changed_at": now} for s in STEPS},
+        "plan": plan or [],
         "source": None,
         "turn_lock": None,
         "waiting_on": None,
@@ -97,6 +100,23 @@ async def set_step(session_id: ObjectId, step: str, state: str) -> dict | None:
     await db().sessions.update_one({"_id": session_id},
                                    {"$set": {f"steps.{step}": {"state": state, "changed_at": now}}})
     return {"step": step, "state": state, "changed_at": now}
+
+
+async def set_plan(session_id: ObjectId, plan: list[dict[str, Any]]) -> list[dict]:
+    """Store the plan and re-derive the milestones from it (FR-008c); returns the milestone changes."""
+    session = await get(session_id)
+    if not session:
+        return []
+    now = datetime.now(UTC)
+    changes = []
+    update: dict[str, Any] = {"plan": plan}
+    for step, state in plans.derive_milestones(plan).items():
+        old = (session["steps"].get(step) or {}).get("state", "not_started")
+        if old != state:
+            update[f"steps.{step}"] = {"state": state, "changed_at": now}
+            changes.append({"step": step, "state": state, "changed_at": now})
+    await db().sessions.update_one({"_id": session_id}, {"$set": update})
+    return changes
 
 
 async def set_source(session_id: ObjectId, source: dict | None) -> None:

@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService, apiError } from '../shared/api.service';
-import { Role, Tenant, User } from '../shared/models';
+import { AdminSession, Role, Tenant, User } from '../shared/models';
 
 /**
  * Admin (FR-002): accounts and SailPoint tenants. Only IAM engineers carry the admin flag. A tenant's credential is
@@ -15,6 +15,73 @@ import { Role, Tenant, User } from '../shared/models';
     <div class="wrap">
       @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
       @if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
+      <!-- US8: every session, with reopen and hand over (FR-032, FR-033); admins never chat in sessions -->
+      <section class="card sessions" aria-labelledby="admin-sessions-h">
+        <div class="sess-head">
+          <h2 id="admin-sessions-h" i18n="@@admin.sessions">Sessions</h2>
+          <span class="muted small" i18n="@@admin.sessionsHint">Every onboarding session. Reopen a finished one, or hand a place to another person with the same role. Admins don't chat in sessions; every reopen and handover is recorded.</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th i18n="@@admin.sSession">Session</th><th i18n="@@admin.sConnector">Connector · tenant</th>
+                <th i18n="@@role.iam">IAM engineer</th><th i18n="@@role.owner">Application owner</th>
+                <th i18n="@@admin.sStatus">Status</th><th i18n="@@admin.sPlan">Plan</th>
+                <th i18n="@@admin.sLast">Last activity</th><th><span class="sr-only" i18n="@@admin.actions">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (s of sessions(); track s.id) {
+                <tr [class.open-form]="handing() === s.id" [attr.data-session]="s.id">
+                  <td><b>{{ s.title }}</b></td>
+                  <td>{{ s.connector_type }} · {{ s.tenant_name }}</td>
+                  <td class="mono">{{ s.iam_engineer?.username }}
+                    @if (s.iam_engineer && s.iam_engineer.status !== 'active') { <span class="bad small">{{ s.iam_engineer.status }}</span> }</td>
+                  <td class="mono">{{ s.application_owner?.username ?? '—' }}
+                    @if (s.application_owner && s.application_owner.status !== 'active') { <span class="bad small">{{ s.application_owner.status }}</span> }</td>
+                  <td><span class="pill" [class.done]="s.status === 'finished'">{{ s.status === 'open' ? openText : finishedText }}</span>
+                    @if (s.status === 'finished' && s.expires_at) { <span class="muted small">{{ deletedIn(s.expires_at) }}</span> }
+                    @if (s.pending_handover) { <span class="muted small" i18n="@@admin.pending">handover after the current answer</span> }</td>
+                  <td>{{ s.plan_done }} / {{ s.plan_total }}</td>
+                  <td class="muted">{{ s.last_activity | date: 'd MMM, HH:mm' }}</td>
+                  <td class="acts">
+                    @if (s.status === 'finished') {
+                      <button type="button" (click)="reopen(s)" [disabled]="busy()" i18n="@@admin.reopen">Reopen</button>
+                    }
+                    <button type="button" (click)="startHandover(s)" [attr.aria-expanded]="handing() === s.id" i18n="@@admin.handOver">Hand over</button>
+                  </td>
+                </tr>
+                @if (handing() === s.id) {
+                  <tr class="open-form">
+                    <td colspan="8">
+                      <form class="handover" (ngSubmit)="handOver(s)">
+                        <label><span i18n="@@admin.place">Place</span>
+                          <select name="place" [(ngModel)]="ho.place" (ngModelChange)="ho.user_id = ''">
+                            <option value="application_owner">{{ ownerPlaceLabel(s) }}</option>
+                            <option value="iam_engineer">{{ iamPlaceLabel(s) }}</option>
+                          </select>
+                        </label>
+                        <label><span i18n="@@admin.handTo">Hand to</span>
+                          <select name="user" [(ngModel)]="ho.user_id" required>
+                            <option value="" disabled i18n="@@admin.pickUser">Choose a person…</option>
+                            @for (u of candidates(s); track u.id) { <option [value]="u.id">{{ u.username }} · {{ u.display_name }}</option> }
+                          </select>
+                        </label>
+                        <p class="muted small" i18n="@@admin.handoverHint">Only active people with that role are listed. The previous person loses access at once; the new one sees the full history and the plan. Both threads get a note about the handover.</p>
+                        <button type="button" (click)="handing.set(null)" i18n="@@admin.cancel">Cancel</button>
+                        <button type="submit" class="primary" [disabled]="busy() || !ho.user_id" i18n="@@admin.handOver">Hand over</button>
+                      </form>
+                    </td>
+                  </tr>
+                }
+              } @empty {
+                <tr><td colspan="8" class="muted" i18n="@@admin.noSessions">No sessions yet.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
       <div class="cols">
         <section class="card">
           <h2 i18n="@@admin.accounts">Accounts</h2>
@@ -117,6 +184,23 @@ import { Role, Tenant, User } from '../shared/models';
   `,
   styles: `
     .wrap { max-width: 90rem; margin: 0 auto; padding: 1.5rem; width: 100%; }
+    .sessions { margin-bottom: 1rem; }
+    .sess-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.9rem; margin-bottom: 0.6rem; }
+    .sess-head h2 { margin: 0; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; min-width: 56rem; }
+    th { text-align: left; font-size: 0.75rem; color: var(--muted); font-weight: 600; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr.open-form { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+    .acts { text-align: right; white-space: nowrap; }
+    .acts button { min-height: 36px; margin-left: 0.3rem; }
+    .pill { padding: 0.05rem 0.55rem; border-radius: 999px; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); font-weight: 600; font-size: 0.75rem; }
+    .pill.done { background: var(--surface-2); color: var(--muted); }
+    .bad { color: var(--bad); font-weight: 600; }
+    .handover { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; }
+    .handover label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; font-weight: 600; }
+    .handover p { flex: 1 1 18rem; margin: 0; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
     @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
     h2 { margin: 0 0 0.6rem; font-size: 1.05rem; }
@@ -149,6 +233,11 @@ export class AdminComponent implements OnInit {
   protected readonly notice = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly replacing = signal<string | null>(null);
+  protected readonly sessions = signal<AdminSession[]>([]);
+  protected readonly handing = signal<string | null>(null);
+  protected ho: { place: Role; user_id: string } = { place: 'application_owner', user_id: '' };
+  protected readonly openText = $localize`:@@admin.statusOpen:Open`;
+  protected readonly finishedText = $localize`:@@admin.statusFinished:Finished`;
   protected nu = { username: '', display_name: '', role: 'application_owner' as Role, is_admin: false, initial_password: '' };
   protected nt = { name: '', api_host: '', client_id: '', client_secret: '' };
   protected cred = { client_id: '', client_secret: '' };
@@ -159,9 +248,11 @@ export class AdminComponent implements OnInit {
 
   private async reload(): Promise<void> {
     try {
-      const [users, tenants] = await Promise.all([this.api.users(), this.api.tenants()]);
+      const [users, tenants, sessions] = await Promise.all([this.api.users(), this.api.tenants(),
+        this.api.adminSessions()]);
       this.users.set(users);
       this.tenants.set(tenants);
+      this.sessions.set(sessions);
     } catch (err) {
       this.error.set(apiError(err).message);
     }
@@ -180,6 +271,43 @@ export class AdminComponent implements OnInit {
     } finally {
       this.busy.set(false);
     }
+  }
+
+  protected deletedIn(iso: string): string {
+    const days = Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
+    return $localize`:@@admin.deletedIn:deleted in ${days}:days: days`;
+  }
+
+  protected ownerPlaceLabel(s: AdminSession): string {
+    return $localize`:@@admin.ownerPlace:Application owner (${s.application_owner?.username ?? '—'}:user:)`;
+  }
+
+  protected iamPlaceLabel(s: AdminSession): string {
+    return $localize`:@@admin.iamPlace:IAM engineer (${s.iam_engineer?.username ?? '—'}:user:)`;
+  }
+
+  /** Active people with the place's role who hold neither place in this session (FR-033). */
+  protected candidates(s: AdminSession): User[] {
+    const taken = new Set([s.iam_engineer?.id, s.application_owner?.id]);
+    return this.users().filter((u) => u.role === this.ho.place && u.status === 'active' && !taken.has(u.id));
+  }
+
+  protected startHandover(s: AdminSession): void {
+    this.ho = { place: 'application_owner', user_id: '' };
+    this.handing.set(this.handing() === s.id ? null : s.id);
+  }
+
+  protected reopen(s: AdminSession): Promise<void> {
+    return this.run(() => this.api.reopenSession(s.id), $localize`:@@admin.reopened:Session reopened.`);
+  }
+
+  protected handOver(s: AdminSession): Promise<void> {
+    const { place, user_id } = this.ho;
+    return this.run(async () => {
+      const r = await this.api.handOver(s.id, place, user_id);
+      this.handing.set(null);
+      if (!r.applied) this.notice.set($localize`:@@admin.handoverPending:The handover takes effect when the agent's current answer ends.`);
+    }, $localize`:@@admin.handedOver:Place handed over.`);
   }
 
   protected roleLabel(r: Role): string {

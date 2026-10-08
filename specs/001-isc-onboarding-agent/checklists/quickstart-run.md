@@ -40,3 +40,15 @@ Status: **Pass**, **Fail**, **Partial** (some evidence, not the full step), **Op
 
 Run §3 (from step 3), §3a, §4 (steps 1–4) and the §5 table with two browsers on the public URL, `admin` as **A**
 and `aws.owner` as **B**, then fill in the Open rows above.
+
+## Revision 2026-10-08 (status replies, plan, owner view, sync, action details, reopen/handover; cost controls)
+
+| Check | Status | Evidence / notes |
+|---|---|---|
+| §3b steps 1-7 on the dev stack (scripted model) | Pass | 2026-10-08: `make onboarding-e2e`, 13/13 specs, including `status-replies`, `owner-view-sync`, `admin-sessions` and the action dialog in `onboarding.spec`; status reply shown in 182-230 ms; handover removed the previous owner in 437-613 ms. |
+| Default e2e costs nothing (Constitution IV) | Pass | Bedrock `Invocations` unchanged across a full scripted-model e2e run (226 before, 224 after: same 3 h window, no new calls). |
+| Prompt caching on real calls | Pass | `REAL_MODEL=1` threads spec: 18 calls, 34 k cache-write, 147 k cache-read, 82 uncached input tokens, about $0.07 ($0.0038 per call vs about $0.0095 before). |
+| SC-005 eval gate (T186) | Pass | 2026-10-08 14:11: 21/21 case×mode at 10 runs (incl. the "what is left?" plan case, 9/10); 819 calls, 7.87 M cache-read tokens, **about $1.86** (the same gate cost about $10 uncached on 2026-10-07). A second `make onboarding-evals` skipped without calling the model. |
+| Leak scan | Pass | `leak-scan.sh dev` and `leak-scan.sh cluster`: no secrets (now also scanning `sessions` for plan text). |
+| Rollout (T172) | Pass | `onboarding-api` image rebuilt and rolled out on k3d; agent code redeployed to AgentCore `isc_onboarding_agent` (code only; no IAM changes). |
+| §3b steps 1-7 through the public URL on the real tenant (T173) | Open | For the user, with two browsers, like T084 and T133. |

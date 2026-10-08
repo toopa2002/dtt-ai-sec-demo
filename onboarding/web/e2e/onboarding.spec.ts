@@ -39,6 +39,18 @@ test('onboard AWS SaaS end to end, with a broken trust fixed on the AWS side', a
   await expect(diag).toContainText(/trust|AssumeRole/i);
   await expect(iam.getByRole('heading', { name: 'SailPoint actions' })).toBeVisible();
   await expect(iam.locator('section.actions').getByText('Created source')).toBeVisible();
+  // FR-020a / quickstart §3b step 5: each row shows its outcome and opens to the request and response.
+  const failedCheck = iam.locator('section.actions button.row[data-action="connection_check"]').last();
+  await expect(failedCheck).toContainText(/failed · /);
+  await failedCheck.click();
+  const dialog = iam.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: /Connection check · failed/ })).toBeVisible();
+  await expect(dialog.getByText('Request the agent sent')).toBeVisible();
+  await expect(dialog.getByText('Response from SailPoint')).toBeVisible();
+  await expect(dialog.getByText("Agent's diagnosis")).toBeVisible();
+  await expect(dialog.getByText('Tenant service credential (never shown)')).toBeVisible();
+  await iam.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
   await expect(relayNotes(ownLog(iam)).first()).toBeVisible({ timeout: 10_000 });
   expect(await ownLog(owner).locator('article.msg.agent').count()).toBeGreaterThan(ownerAgentBefore);
 
