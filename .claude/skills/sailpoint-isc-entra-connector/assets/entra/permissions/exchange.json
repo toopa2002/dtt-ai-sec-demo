@@ -1,0 +1,12 @@
+{
+  "profile": "exchange",
+  "description": "Exchange Online mailboxes, mail-enabled security groups and distribution lists. Certificate auth (entra-setup.sh --exchange-cert) plus the Exchange Administrator directory role.",
+  "resources": [
+    {
+      "api": "Office 365 Exchange Online", "appId": "00000002-0000-0ff1-ce00-000000000000",
+      "appRoles": [
+        { "name": "Exchange.ManageAsApp", "why": "App-only Exchange Online PowerShell/REST access" }
+      ]
+    }
+  ]
+}

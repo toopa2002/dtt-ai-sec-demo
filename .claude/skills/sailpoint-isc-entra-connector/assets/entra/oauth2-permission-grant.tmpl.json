@@ -1,0 +1,6 @@
+{
+  "clientId": "${SP_OBJECT_ID}",
+  "consentType": "AllPrincipals",
+  "resourceId": "${RESOURCE_SP_ID}",
+  "scope": "${SCOPES}"
+}

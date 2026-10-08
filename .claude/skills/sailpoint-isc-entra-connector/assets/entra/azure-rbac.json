@@ -1,0 +1,8 @@
+{
+  "_notes": "Azure RBAC roles for the ai-agents profile (Azure AI Foundry agent discovery). Assigned to the service principal at each subscription passed with --foundry-subscriptions. Role names as SailPoint documents them; entra-setup.sh checks each exists before assigning.",
+  "scope": "/subscriptions/${SUBSCRIPTION_ID}",
+  "roles": [
+    { "role": "Reader", "why": "Enumerate AI Foundry hubs, projects and resources." },
+    { "role": "Cognitive Services Data Contributor (Preview)", "why": "Read Foundry agent definitions through the data plane." }
+  ]
+}

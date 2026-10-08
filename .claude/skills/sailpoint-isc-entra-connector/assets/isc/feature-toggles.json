@@ -1,0 +1,26 @@
+{
+  "_notes": "connectorAttributes set per profile by `isc-source.sh configure --profiles`. Field NAMES were verified on a live tenant's Microsoft Entra source-config form (2026-10-08); configure still only sends fields present on your tenant's form and reports the rest. The boolean values are what the UI toggle stores; exoAuthenticationType's allowed values are not verified, so it is left to the UI. ai-agents turns on Foundry and explicitly OFF Copilot Studio and Agent 365: those datasets fail without their own setup (Power Platform application user; Agent 365 user refresh token in agent365RefreshToken) \u2014 seen live. Switch them on by hand after that setup.",
+  "readonly": {},
+  "provisioning": {},
+  "machine-identity": {
+    "manageAzureServicePrincipalAsAccount": true,
+    "enableManagedIdentityManagement": true,
+    "enableSystemAssignedManagedIdentity": true
+  },
+  "ai-agents": {
+    "enableAIFoundryAgent": true,
+    "enableCopilotAIAgent": false,
+    "enableMicrosoftAgent365": false
+  },
+  "exchange": {
+    "manageExchangeOnline": true,
+    "aggregateAllGroups": true
+  },
+  "teams": {
+    "enableTeamsGovernance": true
+  },
+  "pim": {
+    "enablePIM": true,
+    "spnManageAzureADPIM": true
+  }
+}

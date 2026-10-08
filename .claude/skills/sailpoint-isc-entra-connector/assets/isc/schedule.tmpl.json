@@ -1,0 +1,4 @@
+{
+  "type": "${SCHEDULE_TYPE}",
+  "cronExpression": "${CRON}"
+}

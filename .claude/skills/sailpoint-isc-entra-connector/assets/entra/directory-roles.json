@@ -1,0 +1,21 @@
+{
+  "_notes": "Entra built-in directory roles assigned to the connector's service principal (tenant scope). Role definition ids are looked up by displayName at runtime. A role is assigned when one of its profiles is selected, or when its optIn flag is passed to entra-setup.sh.",
+  "roles": [
+    {
+      "name": "User Administrator",
+      "profiles": ["provisioning"],
+      "why": "Graph permissions alone can't set passwords or delete users; SailPoint documents User Administrator for password set/reset and user deletion."
+    },
+    {
+      "name": "Privileged Authentication Administrator",
+      "profiles": [],
+      "optIn": "--manage-admin-users",
+      "why": "Needed only to reset passwords / change users who themselves hold admin roles. Very powerful: assign only when ISC must manage admin accounts."
+    },
+    {
+      "name": "Exchange Administrator",
+      "profiles": ["exchange"],
+      "why": "Exchange Online app-only access (Exchange.ManageAsApp) runs cmdlets with the app's directory role; mailbox and distribution list management needs Exchange Administrator."
+    }
+  ]
+}

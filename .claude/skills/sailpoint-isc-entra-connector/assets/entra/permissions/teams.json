@@ -1,0 +1,20 @@
+{
+  "profile": "teams",
+  "description": "Microsoft Teams teams, channels and memberships (and Teams apps) for governance/discovery. Message/chat content permissions (ChannelMessage.Read.All, Chat.Read.All, Files.Read.All, Sites.Read.All) are deliberately left out; add them here only if the SailPoint feature you enable needs them.",
+  "resources": [
+    {
+      "api": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        { "name": "Channel.ReadBasic.All", "why": "List channels" },
+        { "name": "ChannelMember.Read.All", "why": "Channel memberships" },
+        { "name": "ChannelSettings.Read.All", "why": "Channel properties" },
+        { "name": "TeamSettings.Read.All", "why": "Team properties" },
+        { "name": "TeamsTab.Read.All", "why": "Tabs (apps pinned in channels)" },
+        { "name": "TeamsAppInstallation.ReadForTeam.All", "why": "Apps installed in teams" },
+        { "name": "TeamsAppInstallation.ReadForUser.All", "why": "Apps installed for users" },
+        { "name": "TeamsAppInstallation.ReadForChat.All", "why": "Apps installed in chats" },
+        { "name": "AppCatalog.Read.All", "why": "Teams app catalog" }
+      ]
+    }
+  ]
+}

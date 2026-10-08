@@ -1,0 +1,4 @@
+{
+  "datasetIds": "${DATASET_IDS}",
+  "disableOptimization": false
+}

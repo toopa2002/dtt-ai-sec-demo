@@ -1,0 +1,14 @@
+{
+  "profile": "machine-identity",
+  "description": "Service principals, app registrations and managed identities as accounts/machine identities (Machine Identity Governance), plus devices and admin-consented permissions.",
+  "resources": [
+    {
+      "api": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        { "name": "Application.Read.All", "why": "Aggregate service principals, app registrations, managed identities, app roles" },
+        { "name": "DelegatedPermissionGrant.Read.All", "why": "Admin-consented (OAuth2) permission grants as entitlements" },
+        { "name": "Device.Read.All", "why": "Device objects for NHI discovery" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "_notes": "Fallback key map for isc-source.sh --plan-only (no tenant access). Values observed on a live ISC tenant on 2026-10-08 (connector 'Microsoft Entra', source-config form with 67 fields). A real run always uses the key map that `discover` writes for your tenant.",
+  "connector": "Microsoft-Entra",
+  "connectorName": "Microsoft Entra",
+  "connectorType": "b7e9374a-3c50-4b51-8880-e501f947bbf8",
+  "discoveredVia": "built-in default (observed 2026-10-08)",
+  "grantTypeValues": ["CERTIFICATE_CREDENTIALS", "CLIENT_CREDENTIALS", "REFRESH_TOKEN"],
+  "allFields": [],
+  "keys": {
+    "domainName": "domainName", "clientID": "clientID", "clientSecret": "clientSecret", "grantType": "grantType",
+    "manageExchangeOnline": "manageExchangeOnline", "exoAuthenticationType": "exoAuthenticationType",
+    "exchangeCertificate": "exchangeCertificate", "exchangeCertificatePassword": "exchangeCertificatePassword",
+    "aggregateAllGroups": "aggregateAllGroups", "aggregateGroupHierarchy": "aggregateGroupHierarchy",
+    "enablePIM": "enablePIM", "spnManageAzurePIM": "spnManageAzurePIM", "spnManageAzureADPIM": "spnManageAzureADPIM",
+    "manageAzureServicePrincipalAsAccount": "manageAzureServicePrincipalAsAccount",
+    "enableManagedIdentityManagement": "enableManagedIdentityManagement",
+    "enableSystemAssignedManagedIdentity": "enableSystemAssignedManagedIdentity",
+    "enableAIFoundryAgent": "enableAIFoundryAgent", "enableCopilotAIAgent": "enableCopilotAIAgent",
+    "enableMicrosoftAgent365": "enableMicrosoftAgent365", "enableTeamsGovernance": "enableTeamsGovernance",
+    "enableCIEM": "enableCIEM", "deltaAggregationEnabled": "deltaAggregationEnabled", "pageSize": "pageSize",
+    "manageO365Groups": "manageO365Groups", "enableAccessPackageManagement": "enableAccessPackageManagement"
+  }
+}

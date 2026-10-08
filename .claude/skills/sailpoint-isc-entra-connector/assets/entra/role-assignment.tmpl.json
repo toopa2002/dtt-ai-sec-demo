@@ -1,0 +1,5 @@
+{
+  "principalId": "${SP_OBJECT_ID}",
+  "roleDefinitionId": "${ROLE_DEFINITION_ID}",
+  "directoryScopeId": "/"
+}
