@@ -112,6 +112,7 @@ async def test_configure_puts_the_vault_value_in_the_patch_only(isc, mock, emit,
     assert ops["domainName"] == "contoso-demo.onmicrosoft.com" and ops["grantType"] == "CLIENT_CREDENTIALS"
     assert ops["aggregateAllGroups"] is True and ops["deltaAggregationEnabled"] is True
     assert "manageAzureServicePrincipalAsAccount" not in ops  # capability not chosen
+    assert ops["enableManagedIdentityManagement"] is False  # directory only: managed identities stay off
     assert "enableAIFoundryAgent" not in ops
     assert fake_vault == ["onboarding-entra-s2"]
     action = emit.of("action")[0]
@@ -292,6 +293,7 @@ async def test_service_principal_settings_only_with_the_capability(isc, mock, em
     assert ops["spnAccountFilter"] == "servicePrincipalType eq 'Application'"
     assert ops["spnManageDirectoryRole"] is True and ops["spnManageRBACRoles"] is True
     assert ops["spnManageAzurePIM"] is False and ops["spnManageAzureADPIM"] is False
+    assert ops["enableManagedIdentityManagement"] is True and ops["enableSystemAssignedManagedIdentity"] is True
 
 
 # ---------------------------------------------------------------- T069: AI agents

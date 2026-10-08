@@ -46,6 +46,10 @@ configure:
   # service_principals: feature-toggles.json "machine-identity". Label swap on the form: "Manage Role Memberships" =
   # spnManageDirectoryRole, "Manage Microsoft Entra Role Assignment Memberships" = spnManageRBACRoles.
   - { field: manageAzureServicePrincipalAsAccount, value: true, capability: service_principals }
+  # Managed identities as accounts too (off in the directory base above; the later entry wins), so machine account
+  # classification's managed-identity criteria have accounts to match.
+  - { field: enableManagedIdentityManagement, value: true, capability: service_principals }
+  - { field: enableSystemAssignedManagedIdentity, value: true, capability: service_principals }
   - { field: spnAccountFilter, value: "servicePrincipalType eq 'Application'", capability: service_principals }
   - { field: spnManageDirectoryRole, value: true, capability: service_principals }
   - { field: spnManageAppRoles, value: true, capability: service_principals }

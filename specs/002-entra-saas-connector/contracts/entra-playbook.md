@@ -71,6 +71,8 @@ configure:
   - { field: enableManagedIdentityManagement, value: false }
   # service_principals
   - { field: manageAzureServicePrincipalAsAccount, value: true, capability: service_principals }
+  - { field: enableManagedIdentityManagement, value: true, capability: service_principals }      # managed identities
+  - { field: enableSystemAssignedManagedIdentity, value: true, capability: service_principals }  # as accounts too
   - { field: spnAccountFilter, value: "servicePrincipalType eq 'Application'", capability: service_principals }
   - { field: spnManageDirectoryRole, value: true, capability: service_principals }   # UI "Manage Role Memberships"
   - { field: spnManageAppRoles, value: true, capability: service_principals }

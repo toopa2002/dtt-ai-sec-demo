@@ -63,7 +63,9 @@ types:
         label: Service principals as accounts
         tag: read_only
         permissions: machine-identity
-        summary: Application service principals with their roles, app roles, groups and consented permissions.
+        summary: >-
+          Application service principals and managed identities with their roles, app roles, groups and consented
+          permissions, classified as machine accounts.
         owner_summary: "Service principals: {permission_count} read permissions"
       - id: ai_agents
         label: AI agents (Azure AI Foundry)

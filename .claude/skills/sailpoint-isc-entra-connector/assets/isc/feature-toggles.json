@@ -1,5 +1,5 @@
 {
-  "_notes": "connectorAttributes set per profile by `isc-source.sh configure --profiles`, merged in this order: readonly first (base settings), then the selected profiles (later ones win). Values mirror a working UI-configured Microsoft Entra source (2026-10-08); field names come from the live source-config form (UI label -> field in references/isc-api.md). configure only sends fields present on your tenant's form and reports the rest. Note the label swap: 'Manage Role Memberships' = spnManageDirectoryRole, 'Manage Microsoft Entra Role Assignment Memberships' = spnManageRBACRoles.",
+  "_notes": "connectorAttributes set per profile by `isc-source.sh configure --profiles`, merged in this order: readonly first (base settings), then the selected profiles (later ones win). machine-identity turns the user- and system-assigned managed identities on as accounts (off in readonly) so machine account classification's managed-identity criteria have accounts to match. Values mirror a working UI-configured Microsoft Entra source (2026-10-08); field names come from the live source-config form (UI label -> field in references/isc-api.md). configure only sends fields present on your tenant's form and reports the rest. Note the label swap: 'Manage Role Memberships' = spnManageDirectoryRole, 'Manage Microsoft Entra Role Assignment Memberships' = spnManageRBACRoles.",
   "readonly": {
     "aggregateAllGroups": true,
     "deltaAggregationEnabled": true,
@@ -14,6 +14,8 @@
   "provisioning": {},
   "machine-identity": {
     "manageAzureServicePrincipalAsAccount": true,
+    "enableManagedIdentityManagement": true,
+    "enableSystemAssignedManagedIdentity": true,
     "spnAccountFilter": "servicePrincipalType eq 'Application'",
     "spnManageAzurePIM": false,
     "spnManageAzureADPIM": false,
