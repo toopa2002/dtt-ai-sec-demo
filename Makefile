@@ -66,4 +66,10 @@ onboarding-leak-scan:     ## Onboarding: scan MongoDB and logs for leaked secret
 onboarding-down:          ## Onboarding: delete the onboarding namespace (PVC included)
 	$(O)/down.sh
 
-.PHONY: help prereqs k3s entra images images-docker up adapters test-agent agent agentcore-gw bedrock-agent chat demo verify tunnel access down destroy onboarding-images onboarding-agent onboarding-agent-delete onboarding-up onboarding-bootstrap onboarding-dev onboarding-evals onboarding-e2e onboarding-leak-scan onboarding-down
+# ---- BookStack: sample app for the ISC Web Services connector (bookstack/) ----
+bookstack-up:             ## BookStack + MariaDB; /bookstack/ on the edge (then make tunnel), API also on :8093
+	bookstack/deploy/up.sh
+bookstack-down:           ## BookStack: delete the bookstack namespace (PVC included)
+	bookstack/deploy/down.sh
+
+.PHONY: help prereqs k3s entra images images-docker up adapters test-agent agent agentcore-gw bedrock-agent chat demo verify tunnel access down destroy onboarding-images onboarding-agent onboarding-agent-delete onboarding-up onboarding-bootstrap onboarding-dev onboarding-evals onboarding-e2e onboarding-leak-scan onboarding-down bookstack-up bookstack-down

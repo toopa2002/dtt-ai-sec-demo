@@ -1,0 +1,105 @@
+# BookStack: sample REST app for the ISC "Web Services" connector. Smallest prebuilt images (no build):
+# linuxserver/bookstack (Alpine, nginx + php-fpm) and yobasystems/alpine-mariadb. Secret bookstack-secrets and
+# __APP_URL__ (https://$NGROK_DOMAIN/bookstack) come from bookstack/deploy/up.sh. Served at /bookstack via the edge.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bookstack
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-data
+  namespace: bookstack
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: bookstack
+spec:
+  selector: { app: mariadb }
+  ports: [{ port: 3306, targetPort: 3306 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  namespace: bookstack
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: mariadb } }
+  template:
+    metadata: { labels: { app: mariadb } }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: mariadb
+          image: yobasystems/alpine-mariadb:latest
+          ports: [{ containerPort: 3306 }]
+          env:
+            - { name: MYSQL_DATABASE, value: bookstack }
+            - { name: MYSQL_USER, value: bookstack }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: bookstack-secrets, key: DB_PASSWORD } }
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: bookstack-secrets, key: DB_ROOT_PASSWORD } }
+          readinessProbe:
+            tcpSocket: { port: 3306 }
+            periodSeconds: 5
+          resources: { requests: { cpu: 50m, memory: 128Mi } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/mysql }]
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: mariadb-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bookstack
+  namespace: bookstack
+spec:
+  selector: { app: bookstack }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bookstack
+  namespace: bookstack
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: bookstack } }
+  template:
+    metadata: { labels: { app: bookstack } }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: bookstack
+          image: lscr.io/linuxserver/bookstack:latest
+          ports: [{ containerPort: 80 }]
+          env:
+            - { name: APP_URL, value: "__APP_URL__" }
+            - { name: DB_HOST, value: mariadb }
+            - { name: DB_PORT, value: "3306" }
+            - { name: DB_DATABASE, value: bookstack }
+            - { name: DB_USERNAME, value: bookstack }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: bookstack-secrets, key: DB_PASSWORD } }
+            - name: APP_KEY
+              valueFrom: { secretKeyRef: { name: bookstack-secrets, key: APP_KEY } }
+          readinessProbe:
+            httpGet: { path: /login, port: 80 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          resources: { requests: { cpu: 50m, memory: 128Mi } }
+          volumeMounts: [{ name: config, mountPath: /config }]
+      volumes:
+        - name: config
+          emptyDir: {}
