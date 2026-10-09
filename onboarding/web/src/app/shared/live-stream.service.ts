@@ -1,6 +1,6 @@
 import { computed, inject, Injectable, NgZone, OnDestroy, signal } from '@angular/core';
 import { API, ApiService } from './api.service';
-import { Action, Message, PlanStep, QueueState, Role, Session, StepKey, StepState, Suggestion } from './models';
+import { Action, Message, PlanStep, Proof, QueueState, Role, SecretStatus, Session, StepKey, StepState, Suggestion } from './models';
 
 /**
  * One onboarding session, live (contracts/live-events.md): history first, then the SSE stream with Last-Event-ID
@@ -26,6 +26,10 @@ export class LiveSession implements OnDestroy {
   readonly heldNotices = signal<{ attachment_id: string; reason: string }[]>([]);
   readonly checkedAttachments = signal<Record<string, 'passed' | 'held'>>({});
   readonly error = signal<string | null>(null);
+  /** Spec 002: the agent asked for a new application secret (reason), shown on the owner's secret field. */
+  readonly secretNeeded = signal<string | null>(null);
+  /** Spec 002 FR-139: minutes a followed plan step has been running, by plan step id. */
+  readonly followMinutes = signal<Record<string, number>>({});
   /** Set when an admin handed this viewer's place to someone else (FR-033): the screen leaves the session. */
   readonly revoked = signal(false);
   /** The viewer's role; the application owner never loads the SailPoint action record (FR-020, research R24). */
@@ -225,12 +229,28 @@ export class LiveSession implements OnDestroy {
     );
     on('participant.changed', () => void this.resync());
     on('access.revoked', () => this.leave());
-    on('session.updated', (d: { source?: Session['source']; status?: Session['status']; reopened_at?: string }) =>
+    on('session.updated', (d: { source?: Session['source']; status?: Session['status']; reopened_at?: string;
+                                 details?: Record<string, unknown> }) =>
       this.session.update((s) =>
         s ? { ...s, ...('source' in d ? { source: d.source ?? null } : {}), ...(d.status ? { status: d.status } : {}),
-              ...(d.reopened_at ? { reopened_at: d.reopened_at } : {}) } : s,
+              ...(d.reopened_at ? { reopened_at: d.reopened_at } : {}),
+              ...(d.details ? { details: { ...s.details, ...d.details } } : {}) } : s,
       ),
     );
+    // spec 002: the application secret (metadata only), proof counts, extend-source and long-running steps
+    on('secret.updated', (d: SecretStatus) => {
+      this.session.update((s) => (s ? { ...s, application_secret: d && d.state ? d : null } : s));
+      if (d?.state === 'received') this.secretNeeded.set(null);
+    });
+    on('secret.needed', (d: { reason?: string }) => this.secretNeeded.set(d.reason || ''));
+    on('proof.updated', (d: Proof) => this.session.update((s) => (s ? { ...s, proof: d } : s)));
+    on('session.mode', (d: { mode: 'new' | 'extend'; source: Session['source'] }) =>
+      this.session.update((s) => (s ? { ...s, mode: d.mode, source: d.source ? { ...d.source, adopted: true } : s.source } : s)),
+    );
+    on('followup.updated', (d: { plan_step: string | null; minutes: number; state: string }) => {
+      if (!d.plan_step) return;
+      this.followMinutes.update((m) => ({ ...m, [d.plan_step as string]: d.minutes }));
+    });
     on('participant.presence', (d: { role: Role; online: boolean }) =>
       this.online.update((o) => ({ ...o, [d.role]: d.online })),
     );

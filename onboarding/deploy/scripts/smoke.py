@@ -1,6 +1,7 @@
 """Two-person smoke run against a running stack (dev.sh, or the cluster through ONB_URL) with the ISC stub.
 
-  uv run --project onboarding/api python onboarding/deploy/scripts/smoke.py [--scenario happy|trust|confirm] [--seed FILE]
+  uv run --project onboarding/api python onboarding/deploy/scripts/smoke.py [--scenario happy|trust|confirm|entra-directory]
+      [--seed FILE] [--capabilities directory,service_principals,ai_agents]
       [--messages N]   (with --seed: N history messages per thread, for the scrolling checks; no model calls)
 
 Creates (idempotently) an admin, an IAM engineer and an application owner directly in MongoDB, registers the stub
@@ -11,6 +12,9 @@ tenant, opens an AWS SaaS session, then:
          the IAM engineer asks for a rerun, the check passes.
   confirm: like trust, but the owner confirms the fix in their thread and the checks rerun under the IAM engineer's
          standing order (FR-016a): action records name the IAM engineer with the confirmation trigger.
+  entra-directory (spec 002): a Microsoft Entra ID session; the owner puts a test secret in the secret field; the IAM
+         engineer orders the connector -> every check passes on /v2026, the vault copy is deleted after Test
+         Connection, the proof counts are set, and the test secret appears nowhere the API can show.
 Prints a summary and exits non-zero on any failed expectation.
 
 Cost (Constitution IV): run against `dev.sh` with AGENT_MODEL=fake (the scripted model) it costs nothing; against a
@@ -34,7 +38,8 @@ os.environ.setdefault("MONGO_URI", "mongodb://127.0.0.1:27018/?replicaSet=rs0&di
 os.environ.setdefault("MONGO_DB", os.environ.get("ONB_DEV_DB", "onboarding_dev"))
 PASSWORD = "smoke-password-123"
 AGENT = os.environ.get("ONB_AGENT", "http://127.0.0.1:8092")
-CALLS = {"happy": 15, "trust": 25, "confirm": 30}  # model calls per scenario on the real model
+CALLS = {"happy": 15, "trust": 25, "confirm": 30, "entra-directory": 12}  # model calls per scenario on the real model
+ENTRA_TEST_SECRET = "Smk3Q~smoke_test_secret_value_not_real_1"  # the stub accepts any Value; never a real one
 USD_PER_CALL = 0.004  # Claude Haiku 4.5 with prompt caching (research R27)
 FAILURES: list[str] = []
 
@@ -107,7 +112,7 @@ async def seed_history(session_id: str, per_thread: int) -> None:
                 await messages.add(sid, speaker=thread, speaker_user_id=user["_id"], text=text)
 
 
-async def main(scenario: str, seed: str = "", history: int = 0) -> int:
+async def main(scenario: str, seed: str = "", history: int = 0, capabilities: str = "directory") -> int:
     from onboarding_api import db
 
     await db.ensure_indexes()
@@ -130,13 +135,26 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
         r.raise_for_status()
         tenant = r.json()
     owner_id = (await owner.get("/auth/session")).json()["id"]
-    name = f"AWS - Acme Org {uuid.uuid4().hex[:4]}"
-    r = await iam.post("/sessions", json={"connector_type": "aws-saas", "tenant_id": tenant["id"],
-                                          "application_owner_id": owner_id,
-                                          "details": {"source_name": name, "source_owner": "smoke.iam",
-                                                      "management_account_id": "111122223333",
-                                                      "accounts": "111122223333, 444455556666",
-                                                      "region": "ap-southeast-1", "agentcore_regions": "ap-southeast-1"}})
+    if scenario == "entra-directory":
+        caps = [c for c in capabilities.split(",") if c]
+        name = f"Entra ID - Contoso {uuid.uuid4().hex[:4]}"
+        r = await iam.post("/sessions", json={
+            "connector_type": "entra-id", "tenant_id": tenant["id"], "application_owner_id": owner_id,
+            "accept_warnings": ["provisioning"] if "provisioning" in caps else [],
+            "details": {"source_name": name, "source_owner": "smoke.iam",
+                        "tenant_domain": "contoso-demo.onmicrosoft.com", "capabilities": caps,
+                        "foundry_subscriptions": "8b1e4c2a-0d3f-4a77-9c51-6f2e8a0b3d19",
+                        "upn_domain": "contoso.example", "usage_location": "TH",
+                        "client_id": "3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05"}})
+    else:
+        name = f"AWS - Acme Org {uuid.uuid4().hex[:4]}"
+        r = await iam.post("/sessions", json={"connector_type": "aws-saas", "tenant_id": tenant["id"],
+                                              "application_owner_id": owner_id,
+                                              "details": {"source_name": name, "source_owner": "smoke.iam",
+                                                          "management_account_id": "111122223333",
+                                                          "accounts": "111122223333, 444455556666",
+                                                          "region": "ap-southeast-1",
+                                                          "agentcore_regions": "ap-southeast-1"}})
     r.raise_for_status()
     sid = r.json()["id"]
     print(f"session {sid} ({scenario})")
@@ -144,7 +162,8 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
         if history:
             await seed_history(sid, history)
         Path(seed).write_text(json.dumps({"session_id": sid, "password": PASSWORD, "stub": STUB,
-                                          "iam": "smoke.iam", "owner": "smoke.owner", "admin": "smoke.admin"}))
+                                          "iam": "smoke.iam", "owner": "smoke.owner", "admin": "smoke.admin",
+                                          "tenant_id": tenant["id"], "owner_id": owner_id}))
         for c in (admin, iam, owner):
             await c.aclose()
         await db.close()
@@ -159,6 +178,14 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
         calls = CALLS[scenario]
         print(f"! Agent model: {model}. This run makes about {calls} Claude Haiku calls on Bedrock, "
               f"about ${calls * USD_PER_CALL:.2f}. Use dev.sh with AGENT_MODEL=fake for a free run.")
+    if scenario == "entra-directory":
+        await entra_flow(iam, owner, sid)
+        for c in (admin, iam, owner):
+            await c.aclose()
+        await db.close()
+        print("\nRESULT:", "PASS" if not FAILURES else f"FAIL ({len(FAILURES)}): " + "; ".join(FAILURES))
+        return 1 if FAILURES else 0
+
     print("\n— application owner asks for the steps")
     reply = await say(owner, sid, "What do I need to set up in AWS first?", "application_owner")
     expect(reply["thread"] == "application_owner", "reply is in the application owner's thread")
@@ -227,10 +254,44 @@ async def main(scenario: str, seed: str = "", history: int = 0) -> int:
     return 1 if FAILURES else 0
 
 
+async def entra_flow(iam: httpx.AsyncClient, owner: httpx.AsyncClient, sid: str) -> None:
+    """Spec 002 quickstart §2 scenario 1 through the API, on the scripted model and the stub."""
+    print("\n— the Entra administrator puts the test secret in the secret field")
+    bad = await owner.put(f"/sessions/{sid}/application-secret",
+                          json={"value": "1b7c2e94-8d3a-4f51-b6e0-2a9c7d4e1f38", "expires_on": "2027-10-01"})
+    expect(bad.status_code == 422 and "ID, not its Value" in bad.text, "a GUID is rejected as the secret's ID")
+    expires = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 300 * 86400))
+    ok = await owner.put(f"/sessions/{sid}/application-secret", json={"value": ENTRA_TEST_SECRET, "expires_on": expires})
+    expect(ok.status_code == 200 and ok.json().get("state") == "received", "the secret is received")
+    expect(ENTRA_TEST_SECRET not in ok.text, "the response never echoes the secret")
+
+    print("\n— IAM engineer orders the connector")
+    await say(iam, sid, "Create the connector and run the checks.", "iam_engineer")
+    session = (await iam.get(f"/sessions/{sid}")).json()
+    actions = (await iam.get(f"/sessions/{sid}/actions")).json()
+    print("\n  steps:", session["steps"])
+    print("  actions:", [(a["action"], a["result"]) for a in actions])
+    for step in ("source_created", "configured", "connection_check", "test_connection", "aggregation"):
+        expect(session["steps"][step] == "passed", f"{step} passed")
+    expect((session.get("application_secret") or {}).get("state") == "vault_deleted",
+           "the vault copy was deleted after Test Connection (FR-125)")
+    expect((session.get("proof") or {}).get("users") is not None, "the proof counts are set")
+    expect(all(a["ordered_by"]["display_name"] == "Smoke Iam" for a in actions), "every action names the IAM engineer")
+    msgs = (await iam.get(f"/sessions/{sid}/messages")).json()
+    shown = json.dumps([session, actions, msgs])
+    expect(ENTRA_TEST_SECRET not in shown, "the test secret appears in no session, action or message (SC-102)")
+    async with httpx.AsyncClient() as s:
+        state = (await s.get(f"{STUB}/_stub/state")).json()
+    expect(all(c.split()[1].startswith("/v2026/") for c in state["calls"]), "every Entra call is on /v2026 (FR-138)")
+    expect(any(p.get("clientSecret") == ENTRA_TEST_SECRET for p in state["entra"]["patches"]),
+           "the stub received exactly the submitted secret")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--scenario", choices=["happy", "trust", "confirm"], default="happy")
+    parser.add_argument("--scenario", choices=["happy", "trust", "confirm", "entra-directory"], default="happy")
+    parser.add_argument("--capabilities", default="directory", help="entra-directory: comma list of capabilities")
     parser.add_argument("--seed", default="", help="only create users, tenant and session; write them to this JSON file")
     parser.add_argument("--messages", type=int, default=0, help="with --seed: history messages per thread")
     args = parser.parse_args()
-    sys.exit(asyncio.run(main(args.scenario, args.seed, args.messages)))
+    sys.exit(asyncio.run(main(args.scenario, args.seed, args.messages, args.capabilities)))

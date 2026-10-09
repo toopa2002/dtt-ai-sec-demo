@@ -65,29 +65,64 @@ def agentcore_token_fn(provider_name: str, region: str, workload_name: str | Non
 
 
 class IscClient:
+    """`experimental`: None keeps the original behaviour (the experimental header on every call, AWS SaaS); a list of
+    path regexes sends it only where an endpoint needs it (playbook `experimental_paths`, spec 002 FR-138)."""
+
     def __init__(self, api_host: str, token_fn: TokenFn, base_url: str | None = None,
-                 transport: httpx.AsyncBaseTransport | None = None):
+                 transport: httpx.AsyncBaseTransport | None = None, experimental: list[str] | None = None):
         self.base = (base_url or os.environ.get("ONBOARDING_ISC_BASE_URL") or f"https://{api_host}").rstrip("/")
         self._token_fn = token_fn
         self._http = httpx.AsyncClient(base_url=self.base, timeout=60, transport=transport)
+        self._experimental = None if experimental is None else [re.compile(p) for p in experimental]
+
+    def _needs_experimental(self, path: str) -> bool:
+        if self._experimental is None:
+            return True
+        bare = path.split("?", 1)[0]
+        return any(p.search(bare) for p in self._experimental)
 
     async def close(self) -> None:
         await self._http.aclose()
 
-    async def request(self, method: str, path: str, *, json: Any = None, content: str | None = None,
-                      content_type: str | None = None, params: dict | None = None) -> Any:
-        headers = {"Authorization": f"Bearer {await self._token_fn()}", "Accept": "application/json, */*",
-                   "X-SailPoint-Experimental": "true"}
+    async def _send(self, method: str, path: str, *, json: Any = None, content: str | None = None,
+                    content_type: str | None = None, params: dict | None = None,
+                    files: dict | None = None) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {await self._token_fn()}", "Accept": "application/json, */*"}
+        if self._needs_experimental(path):
+            headers["X-SailPoint-Experimental"] = "true"
         if content_type:
             headers["Content-Type"] = content_type
-        response = await self._http.request(method, path, json=json, content=content, params=params, headers=headers)
+        response = await self._http.request(method, path, json=json, content=content, params=params, headers=headers,
+                                            files=files)
         if response.status_code >= 400:
             raise IscError(response.status_code, method, path, response.text)
+        return response
+
+    @staticmethod
+    def _body(response: httpx.Response) -> Any:
         if not response.content:
             return {}
         if "json" in response.headers.get("content-type", ""):
             return response.json()
         return response.text
+
+    async def request(self, method: str, path: str, *, json: Any = None, content: str | None = None,
+                      content_type: str | None = None, params: dict | None = None) -> Any:
+        return self._body(await self._send(method, path, json=json, content=content, content_type=content_type,
+                                           params=params))
+
+    async def post_multipart(self, path: str, fields: dict[str, str] | None = None) -> Any:
+        """multipart/form-data, as v2026 load-accounts / load-entitlements expect; `fields` may be empty."""
+        if fields:
+            return self._body(await self._send("POST", path, files={k: (None, v) for k, v in fields.items()}))
+        boundary = "onboarding-boundary"  # an empty multipart body still needs its closing boundary
+        return self._body(await self._send("POST", path, content=f"--{boundary}--\r\n",
+                                           content_type=f"multipart/form-data; boundary={boundary}"))
+
+    async def count(self, path: str, filters: str) -> int:
+        """A collection's size from X-Total-Count (`count=true&limit=1`)."""
+        response = await self._send("GET", path, params={"filters": filters, "count": "true", "limit": "1"})
+        return int(response.headers.get("X-Total-Count") or 0)
 
     async def get(self, path: str, **kw: Any) -> Any:
         return await self.request("GET", path, **kw)

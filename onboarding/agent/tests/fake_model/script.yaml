@@ -15,6 +15,132 @@ rules:
     then:
       - text: "Here is the slow answer."
 
+  # ================================================================ Microsoft Entra ID (spec 002, T029)
+  # Scoped with `connector`, and listed first so the AWS rules below never see an Entra session.
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: 'AADSTS7000215'}
+    then:
+      - text: |
+          **Side: Entra.** The connection check failed with `AADSTS7000215`: SailPoint got an invalid client secret
+          (usually the secret's ID instead of its Value). I've asked the Entra administrator for a new secret through
+          the secret field.
+      - tool: request_new_secret
+        input: {reason: "SailPoint rejected the secret (AADSTS7000215): the ID may have been used instead of the Value"}
+      - tool: note_diagnosis
+        input: {text: "Cause on the Entra side: invalid client secret (AADSTS7000215). A new secret goes through the secret field."}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"running": true'}
+    then:
+      - text: >-
+          Account aggregation is still running in SailPoint. The session follows it and posts the result here when it
+          ends, even if nobody is watching.
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"tenant_limitation": true'}
+    then:
+      - text: |
+          This SailPoint tenant doesn't let automation start Foundry dataset aggregation.
+          That's a **tenant limitation**, not a setup problem, and the onboarding hasn't failed. Please start it in ISC:
+          {ui_path}. Then tell me "done" and I'll check the AI-agent count and turn on the schedule.
+      - tool: set_waiting
+        input: {"on": iam_engineer, reason: "start the Foundry aggregation in ISC, then say \"done\""}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"ok": false'}
+    then:
+      - text: "**The check failed:** `{error}`."
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, round: 0, text: 'extend'}
+    then:
+      - text: "Looking for the existing Entra source for this tenant."
+      - {tool: find_connector_sources}
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, min_round: 1, last: '"sources": \[\{'}
+    then:
+      - tool: adopt_source
+        input: {source_id: "{source_id}"}
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, min_round: 1, last: '"adopted": true'}
+    then:
+      - {tool: configure_source}
+      - {tool: ensure_schema_attributes}
+      - {tool: peek_accounts}
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, round: 0, has_source: false, text: 'create|connector|run the checks'}
+    then:
+      - text: "Creating the Entra source and running the checks now."
+      - {tool: create_source}
+      - {tool: configure_source}
+      - {tool: ensure_schema_attributes}
+      - {tool: peek_accounts}
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, round: 0, has_source: true, text: 'rerun|run the|again|check'}
+    then:
+      - text: "Rerunning the checks now."
+      - {tool: peek_accounts}
+
+  - when: {connector: Microsoft Entra ID, round: 0, text: 'continuing with the next step'}
+    then:
+      - {tool: aggregate_datasets}
+      - {tool: set_dataset_schedule}
+      - {tool: set_provisioning_policy}
+      - {tool: set_correlation}
+
+  - when: {connector: Microsoft Entra ID, role: iam_engineer, round: 0, text: '^done|started it in isc'}
+    then:
+      - {tool: count_ai_agents}
+      - {tool: set_dataset_schedule}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"accounts_read"'}
+    then:
+      - {tool: test_connection}
+      - {tool: start_aggregation}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"entitlements": \{'}
+    then:
+      - {tool: set_machine_classification}
+      - {tool: aggregate_datasets}
+      - {tool: set_dataset_schedule}
+      - {tool: set_provisioning_policy}
+      - {tool: set_correlation}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"ai_agents"|"schedule"|"skipped"|"kept_existing"|"rules"'}
+    then:
+      - text: >-
+          All checks passed: connection check, Test Connection, entitlement and account aggregation, and each chosen
+          capability's check. The counts are in "What SailPoint now sees".
+      - tool: notify_other_thread
+        input: {relay_note: "All SailPoint checks passed; the Entra source is live."}
+      - tool: set_waiting
+        input: {"on": null}
+
+  - when: {connector: Microsoft Entra ID, role: application_owner, round: 0, text: '\[masked\]'}
+    then:
+      - text: >-
+          I didn't receive it, and nobody can see it. Because it went into the chat, please delete that secret in
+          Entra (Certificates & secrets), create a new one and put its Value in the secret field.
+      - tool: request_new_secret
+        input: {reason: "a secret was pasted into the chat and counts as exposed"}
+
+  - when: {connector: Microsoft Entra ID, role: application_owner, round: 0, text: 'secret in the field|new secret'}
+    then:
+      - text: "Thanks: the secret field shows it as received. Nothing else to do for it."
+
+  - when: {connector: Microsoft Entra ID, role: application_owner, round: 0, text: 'appId|"servicePrincipal"'}
+    then:
+      - text: "Thanks: the app is registered. I've noted its Application (client) ID. Next: add the permissions."
+      - tool: record_application_id
+        input: {client_id: "3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05"}
+
+  - when: {connector: Microsoft Entra ID, round: 0, text: 'apply the new secret'}
+    then:
+      - {tool: apply_application_secret}
+
+  - when: {connector: Microsoft Entra ID, role: application_owner, round: 0, text: 'new secret received'}
+    then:
+      - {tool: apply_application_secret}
+
+  - when: {connector: Microsoft Entra ID, min_round: 1, last: '"applied": true'}
+    then:
+      - {tool: peek_accounts}
+
   # ---------------------------------------------------------------- after any SailPoint check failed (trust)
   - when: {min_round: 1, last: '"ok": false.*(AssumeRole|not authorized|trust)'}
     then:

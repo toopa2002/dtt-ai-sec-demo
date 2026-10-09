@@ -1,0 +1,16 @@
+{
+  "profile": "pim",
+  "description": "Privileged Identity Management: eligible/active assignments for PIM-for-Groups and Entra directory roles. Azure resource (RBAC) PIM additionally needs an Azure role (Owner or User Access Administrator at Tenant Root Group / subscription) - see references/entra-permissions.md.",
+  "resources": [
+    {
+      "api": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        { "name": "PrivilegedAccess.Read.AzureADGroup", "why": "PIM for Groups (SailPoint docs)" },
+        { "name": "PrivilegedAssignmentSchedule.Read.AzureADGroup", "why": "Active PIM group assignments (SailPoint docs)" },
+        { "name": "PrivilegedEligibilitySchedule.Read.AzureADGroup", "why": "Eligible PIM group assignments (SailPoint docs)" },
+        { "name": "RoleEligibilitySchedule.Read.Directory", "why": "Eligible directory role assignments (Graph PIM API; not on SailPoint's list)" },
+        { "name": "RoleAssignmentSchedule.Read.Directory", "why": "Active directory role assignment schedules (Graph PIM API; not on SailPoint's list)" }
+      ]
+    }
+  ]
+}

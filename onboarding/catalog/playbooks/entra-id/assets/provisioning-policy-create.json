@@ -1,0 +1,30 @@
+{
+  "_notes": "CREATE provisioning policy (joiner): what ISC sends when it creates an Entra account. Based on the default a UI-created Microsoft Entra source carries (observed 2026-10-08). 'Create Unique Account ID' and 'Create Password' are SailPoint's built-in cloud rules. Applied by `isc-source.sh provisioning-policy` as POST /v2026/sources/{id}/provisioning-policies, or PUT .../provisioning-policies/CREATE to replace an existing one. Keys starting with _ are stripped before sending.",
+  "name": "Account",
+  "description": "Entra account created by SailPoint ISC",
+  "usageType": "CREATE",
+  "fields": [
+    { "name": "accountType", "type": "string", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "static", "attributes": { "value": "User" } } },
+    { "name": "userPrincipalName", "type": "string", "isRequired": true, "isMultiValued": false,
+      "attributes": { "template": "$(firstname).$(lastname)$(uniqueCounter)@{upn_domain}" },
+      "transform": { "type": "rule", "attributes": { "name": "Create Unique Account ID" } } },
+    { "name": "mailNickname", "type": "string", "isRequired": true, "isMultiValued": false,
+      "attributes": { "template": "$(firstname).$(lastname)$(uniqueCounter)" },
+      "transform": { "type": "rule", "attributes": { "name": "Create Unique Account ID" } } },
+    { "name": "password", "type": "secret", "isRequired": true, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "rule", "attributes": { "name": "Create Password" } } },
+    { "name": "displayName", "type": "string", "isRequired": true, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "identityAttribute", "attributes": { "name": "displayName" } } },
+    { "name": "givenName", "type": "string", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "identityAttribute", "attributes": { "name": "firstname" } } },
+    { "name": "surname", "type": "string", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "identityAttribute", "attributes": { "name": "lastname" } } },
+    { "name": "accountEnabled", "type": "boolean", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "static", "attributes": { "value": "true" } } },
+    { "name": "usageLocation", "type": "string", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "static", "attributes": { "value": "{usage_location}" } } },
+    { "name": "forceChangePasswordNextSignIn", "type": "boolean", "isRequired": false, "isMultiValued": false, "attributes": {},
+      "transform": { "type": "static", "attributes": { "value": "true" } } }
+  ]
+}

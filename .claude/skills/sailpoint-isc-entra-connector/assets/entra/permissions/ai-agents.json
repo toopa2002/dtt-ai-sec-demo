@@ -1,0 +1,18 @@
+{
+  "profile": "ai-agents",
+  "description": "Azure AI Foundry agent discovery (SailPoint Agentic Fabric licence). Also needs Azure RBAC on each subscription (azure-rbac.json, --foundry-subscriptions) and the source toggle 'Enable Azure AI Foundry Agents'. Copilot Studio and Agent 365 need manual steps (references/entra-permissions.md).",
+  "resources": [
+    {
+      "api": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        { "name": "Application.Read.All", "why": "Map agents to their service principals" }
+      ]
+    },
+    {
+      "api": "Windows Azure Service Management API", "appId": "797f4846-ba00-4fd7-ba43-dac1f8f63013",
+      "delegated": [
+        { "name": "user_impersonation", "why": "SailPoint documents this delegated permission for Foundry discovery via Azure Resource Manager" }
+      ]
+    }
+  ]
+}

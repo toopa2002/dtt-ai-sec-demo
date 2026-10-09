@@ -70,6 +70,10 @@ import { Action } from './models';
                 @if (a.duration_ms !== null && a.duration_ms !== undefined) { <dt i18n="@@act.duration">Duration</dt><dd>{{ seconds(a.duration_ms) }}</dd> }
                 @if (a.response?.counts?.accounts !== undefined) { <dt i18n="@@act.accounts">Accounts read</dt><dd>{{ a.response?.counts?.accounts }}</dd> }
                 @if (a.response?.counts?.entitlements !== undefined) { <dt i18n="@@act.entitlements">Entitlements</dt><dd>{{ a.response?.counts?.entitlements }}</dd> }
+                @if (a.response?.counts?.users !== undefined) { <dt i18n="@@act.users">Users</dt><dd>{{ a.response?.counts?.users }}</dd> }
+                @if (a.response?.counts?.service_principals !== undefined) { <dt i18n="@@act.sps">Service principals</dt><dd>{{ a.response?.counts?.service_principals }}</dd> }
+                @if (a.response?.counts?.ai_agents !== undefined) { <dt i18n="@@act.agents">AI agents</dt><dd>{{ a.response?.counts?.ai_agents }}</dd> }
+                @if (a.summary) { <dt i18n="@@act.summary">Summary</dt><dd class="mono">{{ a.summary }}</dd> }
                 @for (t of taskRows(); track t[0]) { <dt i18n="@@act.task">Task</dt><dd class="mono">{{ t[0] }} · {{ t[1] }}</dd> }
                 @if (a.response?.error || a.error) {
                   <dt i18n="@@act.error">Error</dt><dd><pre>{{ a.response?.error || a.error }}</pre></dd>
@@ -156,6 +160,7 @@ export class ActionDialogComponent {
   readonly taskRows = computed(() => Object.entries(this.action()?.response?.task_states ?? {}));
   readonly resultText = computed(() => {
     const r = this.action()?.result;
+    if (r === 'tenant_limitation') return $localize`:@@act.limitation:Tenant limitation: start it in ISC`;
     return r === 'ok' ? $localize`:@@act.ok:Succeeded` : r === 'failed' ? $localize`:@@act.failed:Failed` : $localize`:@@act.running:Running`;
   });
 
@@ -220,6 +225,17 @@ export function actionLabel(a: string): string {
       aggregate: $localize`:@@action.aggregate:Aggregation`,
       test_connection: $localize`:@@action.test:Test Connection`,
       delete_source: $localize`:@@action.delete:Deleted source`,
+      // spec 002
+      aggregate_entitlements: $localize`:@@action.aggEnt:Entitlement aggregation`,
+      aggregate_accounts: $localize`:@@action.aggAcct:Account aggregation`,
+      aggregate_datasets: $localize`:@@action.aggData:AI agent aggregation`,
+      adopt_source: $localize`:@@action.adopt:Extending source`,
+      ensure_schema_attributes: $localize`:@@action.schema:Account model`,
+      set_dataset_schedule: $localize`:@@action.schedule:Dataset schedule`,
+      set_provisioning_policy: $localize`:@@action.policy:Account-creation policy`,
+      set_correlation: $localize`:@@action.correlation:Account matching`,
+      apply_application_secret: $localize`:@@action.secret:Applied new secret`,
+      set_machine_classification: $localize`:@@action.classification:Machine account classification`,
     }[a] ?? a
   );
 }

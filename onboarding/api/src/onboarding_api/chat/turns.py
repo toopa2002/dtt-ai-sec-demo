@@ -28,6 +28,7 @@ from ..db import db, screenshots
 from ..logging import turn_id_var
 from ..masking import mask_obj, mask_text
 from ..metrics import record_metric, record_usage
+from ..secrets import service as secrets
 from ..sessions import plan as plans
 from ..sessions import repo
 from ..tenants import service as tenants
@@ -150,7 +151,78 @@ async def _context(session: dict, tenant: dict) -> dict:
         "steps": steps,
         "plan": [{k: v for k, v in step.items() if k != "changed_at"} for step in plans.public(session.get("plan") or [])],
         "source": session.get("source"),
+        **({"mode": session.get("mode", "new")} if session.get("mode") else {}),
+        **({"application_secret": secrets.turn_context(session)} if session.get("application_secret") else {}),
     }
+
+
+PROOF_KEYS = ("users", "service_principals", "entitlements", "ai_agents")
+TENANT_LIMITATION_WAIT = "start it in ISC as the agent described, then say \"done\""
+
+
+async def _after_action(session_id: ObjectId, session: dict, ev: dict, thread: str, turn_id: str) -> None:
+    """Spec 002: what an Entra action means for the session beyond its record (contracts/agent-invocation.md)."""
+    action, result = ev.get("action"), ev.get("result")
+    if result == "ok" and ev.get("secret_applied"):
+        await secrets.mark_applied(session_id)
+    if action == "test_connection" and result == "ok":
+        current = await repo.get(session_id) or {}
+        source = current.get("source") or {}
+        if source and (ev.get("source") or {}).get("id") in (None, source.get("id")):
+            await secrets.delete_vault_copy(session_id, source.get("id"))
+    counts = ((ev.get("response") or {}).get("counts") or {})
+    proof = {k: int(v) for k, v in counts.items() if k in PROOF_KEYS and isinstance(v, int | float)}
+    if action == "aggregate_datasets":
+        if result == "tenant_limitation":
+            proof["ai_agents_state"] = "tenant_limitation"
+        elif result == "ok":
+            proof["ai_agents_state"] = "counted"
+    if proof and result in ("ok", "tenant_limitation"):
+        stored = await repo.set_proof(session_id, proof)
+        await events.emit(session_id, "proof.updated", stored, visible_to=events.for_role("iam_engineer"))
+    if result == "tenant_limitation":
+        current = await repo.get(session_id) or {}
+        step = ev.get("plan_step")
+        if step and any(st["id"] == step for st in current.get("plan") or []):
+            try:
+                await _store_plan(session_id, plans.apply_ops(current.get("plan") or [], [
+                    {"op": "set_state", "step_id": step, "state": "blocked",
+                     "reason": "start it in ISC (tenant limitation)"}]))
+            except plans.PlanError as exc:
+                log.warning("tenant limitation plan update rejected: %s", exc)
+        reason = await repo.set_waiting(session_id, "iam_engineer", ev.get("waiting_reason") or TENANT_LIMITATION_WAIT)
+        await events.emit(session_id, "thread.waiting", {"waiting_on": "iam_engineer", "reason": reason})
+        await repo.set_hint(session_id, "iam_engineer", "tenant_limitation")
+    elif action == "aggregate_datasets" and result == "ok":
+        await repo.set_hint(session_id, "iam_engineer", None)
+    if ev.get("follow") and result == "running":
+        from . import followups
+
+        await followups.start(session_id, ev, thread, turn_id)
+
+
+async def after_secret_submitted(session_id: ObjectId, user) -> None:  # type: ignore[no-untyped-def]
+    """FR-122: a new secret takes effect in ISC. Under the IAM engineer's standing check order the owner's submission
+    starts a turn that applies it and reruns the checks (research R2); otherwise the IAM engineer is told."""
+    session = await repo.get(session_id)
+    if not session:
+        return
+    await repo.set_hint(session_id, "application_owner", None)
+    if not session.get("source"):
+        return  # first secret: the IAM engineer's order to create the source will use it
+    if session.get("check_order"):
+        note = await messages.add(session_id, speaker="agent", thread="application_owner", kind="system_note",
+                                  text="New secret received. Applying it in SailPoint and rerunning the checks.",
+                                  speaker_user_id=user.id, queued=True, meta={"trigger": "secret_submitted"},
+                                  tone="info")
+        await _emit_message(session_id, note, {})
+        await _emit_message(session_id, await create_reply(session_id, note), {})
+        kick(session_id)
+        return
+    note = await messages.add(session_id, speaker="agent", thread="iam_engineer", kind="system_note",
+                              text="A new secret is waiting; order 'apply the new secret' when you're ready.",
+                              tone="info")
+    await _emit_message(session_id, note, {})
 
 
 async def _history(session_id: ObjectId, current_id: ObjectId) -> list[dict]:
@@ -229,6 +301,8 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
         thread = message.get("thread") or message["speaker"]
         other = messages.other_thread(thread)
         role = user["role"]
+        # A queued system note (spec 002: follow-up continuation, secret submitted) runs as the user it names.
+        meta_trigger = (message.get("meta") or {}).get("trigger")
         # The standing check order (research R16) survives questions: only a new SailPoint change ordered by the IAM
         # engineer (create, configure, delete) replaces it, below; running the checks again renews it.
         check_order = session.get("check_order")
@@ -239,12 +313,17 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
             "ordered_by": {"user_id": str(user["_id"]), "role": role, "display_name": user["display_name"]},
             "session": await _context(session, tenant),
             "history": await _history(session_id, message["_id"]),
-            "message": {"seq": message["seq"], "thread": thread, "speaker": message["speaker"],
+            "message": {"seq": message["seq"], "thread": thread,
+                        "speaker": "system" if message["speaker"] == "agent" else message["speaker"],
                         "text": message["text"]},
             "images": await _images(message),
             "waiting_on": session.get("waiting_on"),
             "waiting_reason": session.get("waiting_reason"),
             "check_order": _public_check_order(session),
+            **({"trigger": meta_trigger} if meta_trigger else {}),
+            **({"secret_waiting": True}
+               if (session.get("application_secret") or {}).get("state") == "received" else {}),
+            **({"secret_exposed": True} if (message.get("meta") or {}).get("secret_exposed") else {}),
             "suggestion_defaults": {
                 r: [i["text"] for i in (catalog.suggestion_defaults(session["connector_type"]).get(r) or {}).get("any", [])]
                 for r in messages.THREADS},
@@ -311,7 +390,7 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                     await _store_plan(session_id, new_plan)
             elif kind == "action":
                 if role == "iam_engineer":
-                    ordered_by, trigger = user["_id"], "order"
+                    ordered_by, trigger = user["_id"], ("followup" if meta_trigger == "followup" else "order")
                     if ev.get("action") in actions.CHECKS:
                         check_order = await repo.set_check_order(session_id, user_id=user["_id"],
                                                                  display_name=user["display_name"], turn_id=turn_id)
@@ -319,7 +398,11 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                         await repo.clear_check_order(session_id)  # a new change order replaces the standing one
                         check_order = None
                 elif check_order and ev.get("action") in actions.CHECKS:
-                    ordered_by, trigger = check_order["user_id"], "application_owner_confirmation"
+                    ordered_by, trigger = check_order["user_id"], (
+                        "secret_submitted" if meta_trigger == "secret_submitted" else "application_owner_confirmation")
+                elif check_order and ev.get("action") == "apply_application_secret" \
+                        and meta_trigger == "secret_submitted":
+                    ordered_by, trigger = check_order["user_id"], "secret_submitted"
                 else:
                     log.warning("dropped action %s from an application owner turn without a standing order",
                                 ev.get("action"))
@@ -328,6 +411,7 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                                                    event=ev, trigger=trigger, order_message_id=message["_id"])
                 await events.emit(session_id, "action.recorded" if new else "action.updated",
                                   await actions.public(record), visible_to=events.for_role("iam_engineer"))
+                await _after_action(session_id, session, ev, thread, turn_id)
             elif kind == "diagnosis":
                 noted = await actions.set_diagnosis(turn_id, ev.get("text", ""))
                 if noted:
@@ -335,8 +419,31 @@ async def _run_turn(session_id: ObjectId, message: dict, turn_id: str) -> None:
                                       visible_to=events.for_role("iam_engineer"))
             elif kind == "source":
                 source = {"id": ev["id"], "name": ev["name"]} if ev.get("id") else None  # empty = deleted
-                await repo.set_source(session_id, source)
-                await events.emit(session_id, "session.updated", {"source": source})
+                adopted = bool(source and ev.get("adopted") and role == "iam_engineer")
+                await repo.set_source(session_id, source, adopted=adopted)
+                await events.emit(session_id, "session.updated", {"source": source and {**source, "adopted": adopted}})
+                if adopted:  # FR-105: extend-source; the steps only a new source needs are skipped
+                    current = await repo.get(session_id) or {}
+                    await _store_plan(session_id, plans.skip_on_extend(current.get("plan") or []))
+                    await events.emit(session_id, "session.mode", {"mode": "extend", "source": source})
+            elif kind == "detail":
+                # Only the Application (client) ID is accepted from the agent (it read it in the owner's output).
+                value = str(ev.get("value") or "").strip()
+                if ev.get("name") == "client_id" and secrets.GUID.match(value):
+                    await db().sessions.update_one({"_id": session_id}, {"$set": {"details.client_id": value.lower()}})
+                    await events.emit(session_id, "session.updated", {"details": {"client_id": value.lower()}})
+            elif kind == "secret_needed":
+                reason = mask_text(" ".join(str(ev.get("reason") or "").split()))[:160]
+                await repo.set_hint(session_id, "application_owner", "waiting_for_secret")
+                await events.emit(session_id, "secret.needed", {"reason": reason})
+                if (message.get("meta") or {}).get("secret_exposed"):
+                    continue  # the exposed-secret note already says it (research R17): no second note
+                why = reason or "the current one no longer works"
+                note = await messages.add(session_id, speaker="agent", thread="application_owner",
+                                          kind="system_note", tone="danger", code="secret_needed",
+                                          text=f"A new client secret is needed: {why}. Create one in Entra and put "
+                                               "its Value in the secret field.")
+                await _emit_message(session_id, note, names)
             elif kind == "other_thread":
                 # FR-006c: a message for the other participant goes in their thread, with a relay note in the
                 # writer's thread. Without text it is a one-line note for the other thread (news for both).

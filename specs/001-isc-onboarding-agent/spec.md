@@ -493,6 +493,7 @@ that fit that status and their role; picking one and sending it gives the same r
 - **FR-029**: In v1 exactly one connector type is *available*: **AWS SaaS** (AWS IAM users, groups and policies, plus
   optional Bedrock / AgentCore AI-agent discovery). The catalog MUST also list the planned types below so users can
   see the roadmap; a planned type cannot start a session.
+  *Amended by spec 002: FR-101 (two available types: AWS SaaS and Microsoft Entra ID).*
 
   | Connector type | v1 status | Application owner will be asked to… | Agent configures in SailPoint… |
   |---|---|---|---|
@@ -618,6 +619,7 @@ that fit that status and their role; picking one and sending it gives the same r
 
 - **FR-010**: The agent MUST NOT perform any action in the application being onboarded and MUST NOT hold, request or
   accept the application's credentials (for AWS: access keys, secret keys, session tokens).
+  *Amended by spec 002: FR-120 (an application secret reaches ISC only through the owner's write-only secret field and the vault).*
 - **FR-011**: The agent MUST give the application owner the connector type's step-by-step setup instructions with all
   values the session knows filled in, and label each step as read-only or as a change. For AWS SaaS these are
   command-line instructions that create the role and policies the connector needs (management account, role name,
@@ -652,6 +654,7 @@ that fit that status and their role; picking one and sending it gives the same r
 - **FR-018**: The agent MUST check for an existing source with the same name and MUST NOT reuse, change or delete a
   source owned by someone else; it may delete and recreate only a source created in this session, and only on the
   IAM engineer's order.
+  *Amended by spec 002: FR-105 (an extend-source session may change, never delete, a source from an earlier session).*
 - **FR-019**: The agent MUST refuse SailPoint change requests from the application owner (other than the check reruns
   of FR-016a) and anything outside the session's connector type and onboarding, and say why.
 - **FR-020**: Every SailPoint change MUST be recorded with: what changed, on which source, who ordered it, why (order
@@ -676,6 +679,7 @@ that fit that status and their role; picking one and sending it gives the same r
   SaaS: AWS trust missing the tenant's External ID or the right SailPoint principal; missing schema-related source
   settings; a stale connector configuration that clears on retry; missing permissions for Bedrock or AgentCore
   discovery; missing change-password policy; role-name collisions.
+  *Amended by spec 002: FR-140 (the Entra failures E1–E11).*
 
 **Secrets and data protection**
 
@@ -686,6 +690,7 @@ that fit that status and their role; picking one and sending it gives the same r
   authoritative link between each change and the IAM engineer who ordered it.
 - **FR-026**: The system MUST mask access keys, secret keys, tokens, passwords and client secrets in messages before
   they are displayed, stored or sent to the agent.
+  *Amended by spec 002: FR-123 and FR-124 (Entra client secret masking and leak scan).*
 - **FR-026a**: The agent MUST check every uploaded screenshot for visible secrets before it is shown to the other
   participant or stored. If it sees a likely secret, the image MUST be held (shown only to the uploader, not stored,
   not used for diagnosis) and the uploader asked to re-upload a cropped or redacted version; a held image is

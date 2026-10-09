@@ -1,0 +1,5 @@
+{
+  "principalId": "${SP_OBJECT_ID}",
+  "resourceId": "${RESOURCE_SP_ID}",
+  "appRoleId": "${APP_ROLE_ID}"
+}

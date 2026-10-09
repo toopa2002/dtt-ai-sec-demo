@@ -1,0 +1,72 @@
+# Which ISC checks run, in which order, and which plan steps they mark (spec 002 contracts/entra-playbook.md). Ported
+# from .claude/skills/sailpoint-isc-entra-connector scripts/isc-source.sh `verify` (peek -> test -> aggregate),
+# `aggregate`, `datasets`, `dataset-schedule`, `schema-spn` and references/isc-api.md (commits 9b53746, b71c53c).
+
+# The ISC tools offered to the model for this type (the role gate still applies).
+tools: [check_tenant_features, find_connector_sources, adopt_source, find_source, get_connector_form, get_task,
+        read_source_setup, create_source, configure_source, apply_application_secret, ensure_schema_attributes,
+        peek_accounts, test_connection, start_aggregation, set_machine_classification, aggregate_datasets,
+        count_ai_agents,
+        set_dataset_schedule, set_provisioning_policy, set_correlation, lifecycle_review, delete_session_source,
+        request_new_secret, record_application_id]
+
+# Each runs only after the previous one succeeded. Tools for capabilities not chosen are skipped.
+order: [create_source, configure_source, ensure_schema_attributes, peek_accounts, test_connection, start_aggregation,
+        set_machine_classification, aggregate_datasets, set_dataset_schedule, set_provisioning_policy, set_correlation]
+
+connection_check:
+  tool: peek_accounts          # POST /v2026/sources/{id}/connector/peek-resource-objects, delta switched off
+  object_type: account
+  max_count: 5
+  passes_when: at least one account object is returned
+  also_sets: application_ready # SailPoint reached Entra with the app, consent and secret: the Entra side is ready
+test_connection:
+  tool: test_connection        # POST /v2026/sources/{id}/connector/test-configuration
+  run_after: connection_check  # Entra (unlike AWS SaaS) reports Test Connection correctly before any aggregation
+  passes_when: status contains SUCCESS
+aggregation:
+  tool: start_aggregation
+  sequence: [entitlements, accounts]   # entitlements first, so accounts link to entitlements that already exist
+  wait_in_turn_seconds: 180            # then the session API follows the task without a turn (FR-139)
+  pending_after_minutes: 30
+  passes_when: every task completes SUCCESS or WARNING
+
+schema:
+  service_principals:
+    asset: account-schema-spn-attributes
+    type_attribute: spn_servicePrincipalType   # set on service-principal accounts only: counts them apart from users
+
+# Machine Account Classification (UI: Machine Accounts → Classification): managed identities and service principals
+# become machine accounts. PUT …/machine-classification-config, then POST …/classify for the accounts already there.
+# From the skill's assets/isc/machine-classification-config.json.
+classification:
+  service_principals: machine-classification-config
+
+datasets:
+  ai_agents:
+    id: "azure:foundry"
+    toggle: enableAIFoundryAgent
+    schedule: true
+    plan_step: aggregate_foundry
+    ui_path: "Admin → Connections → Sources → {source_name} → Machine Identity Datasets → Azure AI Foundry → Aggregate"
+  # Other datasets on the source, aggregated only if someone switched them on (then their known errors apply):
+  others:
+    "microsoft:copilot": enableCopilotAIAgent
+    "microsoft:agent365": enableMicrosoftAgent365
+  unavailable_signature: "endpoint is unavailable"   # 404 body: the tenant doesn't expose it to automation (FR-135)
+
+provisioning:
+  policy: provisioning-policy-create     # assets/; {upn_domain}, {usage_location}
+  correlation: correlation-config
+  lifecycle_template: lifecycle-state-account-actions.patch   # shown for review, never applied (FR-136)
+
+milestone_order: [application_ready, source_created, configured, connection_check, test_connection, aggregation]
+
+# The plan step each milestone's set_step marks (research R22).
+plan_step:
+  application_ready: confirm_consent
+  source_created: create_source
+  configured: configure_source
+  connection_check: connection_check
+  aggregation: aggregate_accounts
+  test_connection: test_connection

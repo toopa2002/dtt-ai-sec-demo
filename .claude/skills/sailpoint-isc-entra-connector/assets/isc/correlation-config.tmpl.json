@@ -1,0 +1,9 @@
+{
+  "_notes": "Account correlation (which identity owns an aggregated Entra account), applied by `isc-source.sh correlation` as PUT /v2026/sources/{id}/correlation-config. Default = the rules a UI-created Entra source gets (identity email == userPrincipalName, then == mail). Put an employee-number rule first when HR feeds employeeId to Entra.",
+  "id": "${CORRELATION_CONFIG_ID}",
+  "name": "${CORRELATION_CONFIG_NAME}",
+  "attributeAssignments": [
+    { "sequence": 1, "property": "email", "value": "userPrincipalName", "operation": "EQ", "complex": false, "ignoreCase": true, "matchMode": null, "filterString": null },
+    { "sequence": 2, "property": "email", "value": "mail", "operation": "EQ", "complex": false, "ignoreCase": true, "matchMode": null, "filterString": null }
+  ]
+}

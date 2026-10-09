@@ -45,6 +45,9 @@ import { PlanStep, Role } from './models';
               @if (st.reason && st.state !== 'done') {
                 <span class="why">{{ st.added_by === 'agent' && st.state !== 'blocked' && st.state !== 'skipped' ? addedBy : '' }}{{ st.reason }}</span>
               }
+              @if (pendingMinutes(st); as m) {
+                <span class="pending" i18n="@@plan.pending">pending · {{ m }} min</span>
+              }
             </span>
             <span class="who" [class.me]="st.actor === viewerRole()">{{ actorLabel(st.actor) }}</span>
           </li>
@@ -55,6 +58,7 @@ import { PlanStep, Role } from './models';
     </section>
   `,
   styles: `
+    .pending { display: block; font-size: 0.75rem; color: var(--info-strong); font-weight: 600; }
     .plan { display: flex; flex-direction: column; gap: 0.55rem; }
     .head { display: flex; align-items: baseline; gap: 0.5rem; }
     h2 { margin: 0; font-size: 0.95rem; }
@@ -95,6 +99,17 @@ export class PlanPanelComponent {
   readonly done = input(0);
   readonly total = input(0);
   readonly ownerLabel = input('Owner');
+  /** Spec 002 FR-139: minutes a followed step has run (live), by plan step id. */
+  readonly followMinutes = input<Record<string, number>>({});
+
+  /** "pending · N min" once a still-running step has passed 30 minutes (from the live count or its pending_since). */
+  protected pendingMinutes(st: PlanStep): number | null {
+    if (st.state === 'done' || st.state === 'failed' || st.state === 'skipped') return null;
+    const live = this.followMinutes()[st.id];
+    const since = st.pending_since ? Math.floor((Date.now() - Date.parse(st.pending_since)) / 60000) : null;
+    const m = Math.max(live ?? 0, since ?? 0);
+    return m >= 30 ? m : null;
+  }
   protected readonly readOnly = $localize`:@@tag.readOnly:read-only`;
   protected readonly change = $localize`:@@tag.change:change`;
   protected readonly addedBy = $localize`:@@plan.addedBy:Added by the agent: `;

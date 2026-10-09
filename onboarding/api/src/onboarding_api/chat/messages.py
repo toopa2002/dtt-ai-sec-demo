@@ -24,6 +24,7 @@ SPEAKERS = ("iam_engineer", "application_owner", "agent")
 THREADS = ("iam_engineer", "application_owner")
 KINDS = ("message", "relay_note", "system_note")
 REPLY_STATES = ("received", "working", "answered", "failed")
+TONES = ("info", "success", "danger")  # spec 002: system-note tones (exposed secret, pending, finished)
 
 
 class MessageError(ValueError):
@@ -39,7 +40,7 @@ async def add(session_id: ObjectId, *, speaker: str, text: str, thread: str | No
               relayed_from: str | None = None, attachment_ids: list[ObjectId] | None = None,
               turn_id: str | None = None, queued: bool = False, meta: dict[str, Any] | None = None,
               reply_to: ObjectId | None = None, reply_state: str | None = None, ahead: int | None = None,
-              status_text: str | None = None) -> dict:
+              status_text: str | None = None, tone: str | None = None, code: str | None = None) -> dict:
     if speaker not in SPEAKERS:
         raise MessageError("unknown speaker")
     if speaker != "agent":
@@ -54,6 +55,8 @@ async def add(session_id: ObjectId, *, speaker: str, text: str, thread: str | No
         raise MessageError("only the agent writes relay and system notes")
     if reply_state is not None and (speaker != "agent" or reply_state not in REPLY_STATES):
         raise MessageError("reply_state is for agent replies: received, working, answered or failed")
+    if tone is not None and (kind != "system_note" or tone not in TONES):
+        raise MessageError("tone is for system notes: info, success or danger")
     if relayed_from is not None and relayed_from not in THREADS:
         raise MessageError("relayed_from must be iam_engineer or application_owner")
     text = (text or "").strip()
@@ -81,6 +84,7 @@ async def add(session_id: ObjectId, *, speaker: str, text: str, thread: str | No
         "ahead": ahead,
         "status_text": mask(status_text)[0] if status_text else None,
         "created_at": datetime.now(UTC),
+        **({"tone": tone} if tone else {}), **({"code": code} if code else {}),
         "expires_at": None,
     }
     result = await db().messages.insert_one(doc)
@@ -146,6 +150,7 @@ async def public(m: dict, names: dict[str, str]) -> dict[str, Any]:
         "ahead": m.get("ahead"),
         "status_text": m.get("status_text"),
         "attachments": atts,
+        **({"tone": m["tone"]} if m.get("tone") else {}), **({"code": m["code"]} if m.get("code") else {}),
         "application_steps": m.get("meta", {}).get("application_steps", []),
         "created_at": m["created_at"],
     }

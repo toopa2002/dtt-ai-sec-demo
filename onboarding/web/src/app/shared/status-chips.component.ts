@@ -6,7 +6,7 @@ import { STEP_KEYS, StepKey, StepState } from './models';
   selector: 'app-status-chips',
   template: `
     <ol aria-label="Onboarding status" i18n-aria-label="@@status.aria">
-      @for (k of keys; track k) {
+      @for (k of keys(); track k) {
         <li class="chip" [class]="steps()[k]" [attr.aria-label]="label(k) + ': ' + stateLabel(steps()[k])">
           @switch (steps()[k]) {
             @case ('passed') { <svg class="icon" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg> }
@@ -29,7 +29,12 @@ export class StatusChipsComponent {
   readonly steps = input.required<Record<StepKey, StepState>>();
   /** Connector-specific label for the first step, e.g. "AWS role ready" (FR-008, SC-009). */
   readonly firstStepLabel = input($localize`:@@step.application_ready:Application ready`);
-  protected readonly keys = STEP_KEYS;
+  /** Chip order from the connector's playbook (spec 002: Entra runs Test Connection before aggregation). */
+  readonly order = input<readonly StepKey[] | null | undefined>(null);
+  protected keys(): readonly StepKey[] {
+    const order = this.order();
+    return order && order.length ? order : STEP_KEYS;
+  }
 
   protected label(k: StepKey): string {
     switch (k) {

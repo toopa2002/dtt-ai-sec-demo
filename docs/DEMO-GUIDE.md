@@ -580,6 +580,17 @@ there instead of rerunning `make tunnel`.
 | 7 | IAM engineer | Aggregation and Test Connection pass; the plan shows what is left (the CloudTrail confirmation). **Finish** the session: both screens become read-only and say an admin can reopen it. |
 | 8 | Admin | **Admin → Sessions** lists every session. **Reopen** the finished one (both can write again; a note in both threads), or **Hand over** a place to another person with the same role: the previous person is taken out of the session at once, the new one sees the full history and the plan. |
 
+#### Microsoft Entra ID (spec 002, about 8 minutes)
+
+| Step | Who | What to show |
+|---|---|---|
+| 1 | IAM engineer | **Catalog**: Microsoft Entra ID is available, with its capability chips (provisioning marked "writes"). **Start a session**: tenant domain, capability cards (choosing AI agents shows the subscriptions field; provisioning shows a warning that must be accepted before **Start session** works), and the "what happens" panel with the permission counts. |
+| 2 | Entra administrator | The **secret field** sits above the conversation. Paste the secret's ID (a GUID) and it is rejected ("this is the secret's ID, not its Value"); put the Value and the expiry date in and the status strip moves to **Received**. Paste a secret into the chat instead: it shows `[masked]` with a red "treat it as exposed" note. |
+| 3 | IAM engineer | "Create the connector and run the checks". The header chips run Test Connection before Aggregation. **What SailPoint now sees** fills in users, service principals, entitlements and AI agents; **Application secret** shows "vault copy deleted"; action rows show `clientSecret: [vaulted]`. |
+| 4 | IAM engineer | With the stub's `dataset_unavailable` switch: the Foundry step is **blocked** as a tenant limitation, with the exact place to start it in ISC; "Done, I started it in ISC" counts the agents and turns on the schedule. |
+
+The secret is a demo value: never use a real tenant's secret in a demo or recording (constitution).
+
 ### 8.4 Run and test without the cluster
 
 `make onboarding-dev` runs the whole stack on this machine against the ISC stub, with the agent calling the real

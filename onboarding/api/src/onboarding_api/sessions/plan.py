@@ -36,23 +36,44 @@ def _clean(text: Any, limit: int) -> str:
     return mask_text(" ".join(str(text or "").split()))[:limit]
 
 
+CAPABILITY_NOT_CHOSEN = "capability not chosen"
+EXISTING_SOURCE = "existing source"
+
+
 def seed(template: list[dict[str, Any]], details: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """The starting plan: every template step `todo`, or `skipped` when its `skip_unless` details are all empty."""
+    """The starting plan: every template step `todo`, or `skipped` when its `skip_unless` details are all empty or
+    (spec 002) its `capability` isn't among `details.capabilities`."""
     details = details or {}
+    chosen = details.get("capabilities")
     now = _now()
     plan = []
     for step in template[:MAX_STEPS]:
         skip_keys = step.get("skip_unless") or []
-        skipped = bool(skip_keys) and not any(details.get(k) for k in skip_keys)
-        plan.append({
+        reason = "Not chosen for this session." if skip_keys and not any(details.get(k) for k in skip_keys) else None
+        if not reason and step.get("capability") and chosen is not None and step["capability"] not in chosen:
+            reason = CAPABILITY_NOT_CHOSEN
+        entry = {
             "id": step["id"], "title": _clean(step["title"], TITLE_MAX), "actor": step["actor"], "kind": step["kind"],
-            "state": "skipped" if skipped else "todo",
-            "reason": "Not chosen for this session." if skipped else None,
+            "state": "skipped" if reason else "todo",
+            "reason": reason,
             "milestone": step.get("milestone"), "added_by": "playbook",
             "instruction": f"setup.md step {step['setup_step']}" if step.get("setup_step") else None,
             "changed_at": now,
-        })
+        }
+        for key in ("capability", "on_extend"):
+            if step.get(key):
+                entry[key] = step[key]
+        plan.append(entry)
     return plan
+
+
+def skip_on_extend(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extend-source (spec 002 FR-105): the steps that only a new source needs are skipped, never removed."""
+    out = [dict(s) for s in plan]
+    for step in out:
+        if step.get("on_extend") == "skip" and step["state"] not in ("done", "skipped"):
+            step["state"], step["reason"], step["changed_at"] = "skipped", EXISTING_SOURCE, _now()
+    return out
 
 
 def _find(plan: list[dict], step_id: str) -> dict:
@@ -162,5 +183,6 @@ def progress(plan: list[dict[str, Any]]) -> tuple[int, int, str | None]:
 
 
 def public(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{k: s.get(k) for k in ("id", "title", "actor", "kind", "state", "reason", "milestone", "added_by",
-                                    "changed_at")} for s in plan]
+    keys = ("id", "title", "actor", "kind", "state", "reason", "milestone", "added_by", "changed_at")
+    extra = ("capability", "pending_since")  # spec 002, only when set: AWS plans look exactly as before
+    return [{k: s.get(k) for k in keys} | {k: s[k] for k in extra if s.get(k)} for s in plan]

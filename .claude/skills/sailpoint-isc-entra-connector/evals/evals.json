@@ -1,0 +1,78 @@
+{
+  "skill_name": "sailpoint-isc-entra-connector",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need to hook our Entra tenant (contoso.onmicrosoft.com) up to SailPoint ISC \u2014 tenant is contoso-sb.api.identitynow-demo.com. Read-only for now, we just want users, groups and roles aggregated for certifications. I'm Global Admin but I don't want anything created yet: give me exactly what you'd run on both sides and show me the dry-run plan. I don't have az logged in on this machine right now.",
+      "expected_output": "Uses the Microsoft Entra SaaS connector (not the VA one); produces a plan-only/dry-run of the Entra app registration with read-only Graph application permissions (User.Read.All, Group.Read.All, Organization.Read.All, RoleManagement.Read.Directory), consent, secret to a file; the ISC sequence discover/create/configure/peek/aggregate; nothing applied; no secret values requested in chat.",
+      "files": [],
+      "assertions": [
+        "Names the cloud Microsoft Entra (SaaS) connector, not the VA-based Azure Active Directory connector",
+        "Entra plan includes the read-only Graph application permissions User.Read.All, Group.Read.All, Organization.Read.All and RoleManagement.Read.Directory",
+        "Entra plan contains no write permissions (no User.ReadWrite.All, Group.ReadWrite.All, Directory.ReadWrite.All)",
+        "Includes an admin consent / grant step for the application permissions",
+        "Client secret is handled without asking the user to paste it into chat (written to a file / not echoed)",
+        "ISC side covers create + configure (domainName contoso.onmicrosoft.com, clientID, clientSecret, grantType) with a concrete dry-run/plan shown for the ISC calls too",
+        "Proof-of-work steps are peek, then test connection, then aggregation",
+        "No ISC call in the plan uses a /beta/ endpoint",
+        "Nothing is created: no --apply / no write commands were executed",
+        "ISC calls shown use the v2026 API"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "We're onboarding Entra ID into IdentityNow with full lifecycle: joiner/mover/leaver provisioning, Exchange Online mailboxes and distribution lists, plus PIM eligible roles so certifiers see them. Our Entra admin will apply things herself, so list every single template/file I need to apply on the Entra side and on the SailPoint side, what each one contains, and which directory roles the app ends up with. Save the list to a markdown file.",
+      "expected_output": "Markdown inventory covering Entra app manifest, permission sets for provisioning/exchange/pim (Exchange.ManageAsApp on Office 365 Exchange Online), consent bodies, directory roles (User Administrator, Exchange Administrator; Privileged Authentication Administrator only opt-in), certificate auth for Exchange, ISC source create body, configure patch (domainName, clientID, clientSecret, grantType), feature toggles, schedule.",
+      "files": [],
+      "assertions": [
+        "A markdown file listing the templates was saved in outputs",
+        "Lists an Entra app registration / manifest template",
+        "Lists provisioning Graph application permissions incl. User.ReadWrite.All and Group.ReadWrite.All, without Directory.ReadWrite.All",
+        "Lists Exchange.ManageAsApp on Office 365 Exchange Online and certificate-based auth for Exchange",
+        "Lists read-only PIM permissions (e.g. PrivilegedEligibilitySchedule.Read.AzureADGroup / RoleEligibilitySchedule.Read.Directory), not ReadWrite PIM permissions",
+        "States the app ends up with User Administrator and Exchange Administrator directory roles, and no Global Administrator",
+        "SailPoint side lists a source-creation body and a connection-settings body (domainName, clientID, clientSecret, grantType)",
+        "SailPoint side includes a CREATE provisioning policy template for joiners",
+        "SailPoint side covers leaver/joiner account actions (lifecycle state) or correlation",
+        "SailPoint side includes aggregation (schedule or aggregation step), and no listed SailPoint endpoint is /beta/",
+        "Connector setting names are either verified or explicitly flagged as unverified (no invented keys presented as fact)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "our sailpoint entra source 'Entra ID - Fabrikam' keeps failing test connection with AADSTS7000215 and when I fixed something last week aggregation then gave 403 Authorization_RequestDenied 'Insufficient privileges to complete the operation' on create account. what's going on and how do I fix it with az cli? app id is 3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f",
+      "expected_output": "Explains AADSTS7000215 = secret ID used instead of Value / wrong or expired secret, shows creating a new secret with az ad app credential reset --append into a file and reconfiguring; explains 403 = missing/unconsented Graph application permission (User.ReadWrite.All etc.), that Global Admin role doesn't substitute, how to check granted appRoleAssignments and grant with az; mentions User Administrator for passwords.",
+      "files": [],
+      "assertions": [
+        "Explains AADSTS7000215 as the secret ID used instead of its Value, or a wrong secret, and distinguishes an expired secret (AADSTS7000222)",
+        "Gives an az ad app credential reset command using the provided app id with --append",
+        "The new secret value is written to a protected file or vault, not printed to the terminal",
+        "Explains the 403 as a missing or unconsented Microsoft Graph application permission",
+        "Names User.ReadWrite.All as the permission needed to create accounts",
+        "Shows how to check which application permissions are actually granted (appRoleAssignments)",
+        "Shows how to grant admin consent with az (admin-consent or appRoleAssignments POST)",
+        "Mentions that a Global Administrator role does not replace Graph permissions, or that User Administrator is needed for password set",
+        "After the fix, re-verifies with peek, test connection and aggregation (any ISC calls non-beta)",
+        "ISC calls shown use the v2026 API"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "The Entra source 'Entra ID - Contoso' is already created and configured in our ISC tenant (acme.api.identitynow.com). Prove it actually works and pull everything in: accounts, entitlements, and the Azure AI Foundry agents dataset. Our security team doesn't allow beta APIs in production, so GA endpoints only, and we standardise on the v2026 API. I don't have the PAT on this machine, so show me exactly which calls you'd make and in what order.",
+      "expected_output": "Plan of peek -> test -> aggregation using v2026 endpoints only: peek-resource-objects, test-configuration, load-entitlements, load-accounts (multipart disableOptimization), aggregate-agents with datasetIds [azure:foundry] + experimental header, task-status polling; notes that the Foundry dataset needs enableAIFoundryAgent + Azure RBAC; no /beta/.",
+      "files": [],
+      "assertions": [
+        "Order is peek, then test connection, then aggregation",
+        "No /beta/ endpoint anywhere in the plan",
+        "Peek and test use /v2026/sources/{id}/connector/peek-resource-objects and .../connector/test-configuration (v2026)",
+        "Aggregation covers entitlements, accounts and the dataset",
+        "Account aggregation uses POST /v2026/sources/{id}/load-accounts as multipart/form-data (disableOptimization)",
+        "Dataset aggregation uses POST /v2026/sources/{id}/aggregate-agents with datasetIds including azure:foundry",
+        "Notes that aggregate-agents (and the dataset list) need the X-SailPoint-Experimental header",
+        "Polls aggregation tasks with a GA task-status endpoint (/v2026/task-status/{id})",
+        "Notes the Foundry dataset must be enabled on the source (enableAIFoundryAgent / aggregationEnabled) and needs Azure-side access",
+        "Every ISC call is on /v2026/ (no v3/v2025 mixing)"
+      ]
+    }
+  ]
+}

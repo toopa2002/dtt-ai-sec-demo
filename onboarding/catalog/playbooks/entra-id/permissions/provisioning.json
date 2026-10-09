@@ -1,0 +1,18 @@
+{
+  "profile": "provisioning",
+  "description": "Create/update/disable/delete users, manage group membership, licences, directory roles and app role assignments. Also assigns the User Administrator directory role (see directory-roles.json).",
+  "resources": [
+    {
+      "api": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        { "name": "User.ReadWrite.All", "why": "Create/update users, licences, enable/disable" },
+        { "name": "Group.ReadWrite.All", "why": "Create/update/delete groups, add/remove members (incl. M365 groups)" },
+        { "name": "User.Invite.All", "why": "B2B guest invitations" },
+        { "name": "User.EnableDisableAccount.All", "why": "Enable/disable and delete user" },
+        { "name": "User-PasswordProfile.ReadWrite.All", "why": "Set/reset passwords (with the User Administrator role)" },
+        { "name": "RoleManagement.ReadWrite.Directory", "why": "Add/remove directory role assignments" },
+        { "name": "AppRoleAssignment.ReadWrite.All", "why": "Add/remove users on enterprise applications (app roles)" }
+      ]
+    }
+  ]
+}

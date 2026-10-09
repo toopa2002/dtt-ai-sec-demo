@@ -59,3 +59,34 @@ def test_mixed_message_keeps_context() -> None:
     assert changed
     assert "arn:aws:iam::111122223333:role/R" in out
     assert "AKIAIOSFODNN7EXAMPLE" not in out
+
+
+# Spec 002 (T025, research R3): Entra client secret Values are masked; the identifiers around them are not.
+ENTRA = "Xy78Q~abcdefghijklmnopqrstuvwxyz0123456"
+
+
+@pytest.mark.parametrize("text", [
+    ENTRA,
+    f"here it is: {ENTRA}",
+    f"value={ENTRA}.",
+    f'"secretText": "{ENTRA}"',
+    "A.b9Q~Z_-.~abcdefghijklmnopqrstuvwxyz012",
+])
+def test_entra_secret_values_are_masked(text: str) -> None:
+    from onboarding_api.masking import contains_entra_secret
+
+    out, changed = mask(text)
+    assert changed and "Q~" not in out and contains_entra_secret(text)
+
+
+@pytest.mark.parametrize("text", [
+    "3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05",  # Application (client) ID / secret ID
+    "contoso-demo.onmicrosoft.com",
+    "az ad app credential reset --id 3f6a1c8e-52d4-4b0f-9a7e-c1d28e4b6a05 --append --query password -o tsv",
+    "SGVsbG8gd29ybGQhIFRoaXMgaXMgYmFzZTY0IG91dHB1dA==",  # base64 command output
+    "Q~ alone is not a secret",
+])
+def test_entra_lookalikes_are_kept(text: str) -> None:
+    from onboarding_api.masking import contains_entra_secret
+
+    assert mask(text) == (text, False) and not contains_entra_secret(text)

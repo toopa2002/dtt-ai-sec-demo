@@ -1,0 +1,70 @@
+# Microsoft Entra source settings (spec 002 contracts/entra-playbook.md). Ported from
+# .claude/skills/sailpoint-isc-entra-connector (commits 9b53746, b71c53c): assets/isc/source-create.tmpl.json,
+# source-configure.patch.tmpl.json, feature-toggles.json (values of a working UI-configured source, 2026-10-08) and
+# references/isc-api.md. Field names come from the live source-config form.
+connector_script: Microsoft-Entra
+connector_name: Microsoft Entra          # GET /v2026/sources?filters=connectorName eq "Microsoft Entra"
+spec_id: b7e9374a-3c50-4b51-8880-e501f947bbf8   # GET /v2026/connectors/Microsoft-Entra -> .type; re-read if it changes
+description: Microsoft Entra source managed by the ISC Onboarding Agent
+
+# SailPoint's current versioned API only (FR-138). Experimental endpoints (X-SailPoint-Experimental: true, sent only on
+# these): dataset aggregation, the datasets list/schedule (not in the published spec; captured from the UI), the
+# machine-identity count, and machine account classification (GA in the published spec, but the tenant answered the
+# PUT with 400 "Experimental Header 'X-SailPoint-Experimental' is required" on 2026-10-08).
+isc_api: v2026
+experimental_paths: ['/aggregate-agents$', '/datasets(/|$)', '^/v2026/machine-identities', '/machine-classification-config$',
+                     '/classify$']
+
+tenant_match_field: domainName           # find_connector_sources / adopt_source compare it to tenant_domain
+secret_fields: {clientSecret: application_secret}   # filled from the vault in tool code; shown as [vaulted]
+full_read: {field: deltaAggregationEnabled}         # off for peek and aggregation, then restored (skill: delta fix)
+
+# Sent only on POST /v2026/sources: without spConnectorSpecId + idnProxyType ISC creates no connector instance, and
+# they can't be added later (the source must then be deleted and recreated).
+creation_only:
+  idnProxyType: sp-connect
+  connectionType: direct
+  spConnectorSupportsCustomSchemas: true
+  deleteThresholdPercentage: 10
+
+# PATCH /v2026/sources/{id} ops, in order. `capability`: sent only when that capability is chosen (in an extend-source
+# session, only for the capabilities being added).
+configure:
+  - { field: domainName, from: tenant_domain }
+  - { field: clientID, from: client_id }
+  - { field: grantType, value: CLIENT_CREDENTIALS }
+  # directory (always): feature-toggles.json "readonly"
+  - { field: aggregateAllGroups, value: true, capability: directory }
+  - { field: deltaAggregationEnabled, value: true, capability: directory }
+  - { field: aggregateGroupHierarchy, value: false, capability: directory }
+  - { field: pageSize, value: 100, capability: directory }
+  - { field: manageO365Groups, value: true, capability: directory }
+  - { field: enableTeamsGovernance, value: false, capability: directory }
+  - { field: enableAccessPackageManagement, value: false, capability: directory }
+  - { field: enableManagedIdentityManagement, value: false, capability: directory }
+  - { field: enableSystemAssignedManagedIdentity, value: false, capability: directory }
+  # service_principals: feature-toggles.json "machine-identity". Label swap on the form: "Manage Role Memberships" =
+  # spnManageDirectoryRole, "Manage Microsoft Entra Role Assignment Memberships" = spnManageRBACRoles.
+  - { field: manageAzureServicePrincipalAsAccount, value: true, capability: service_principals }
+  # Managed identities as accounts too (off in the directory base above; the later entry wins), so machine account
+  # classification's managed-identity criteria have accounts to match.
+  - { field: enableManagedIdentityManagement, value: true, capability: service_principals }
+  - { field: enableSystemAssignedManagedIdentity, value: true, capability: service_principals }
+  - { field: spnAccountFilter, value: "servicePrincipalType eq 'Application'", capability: service_principals }
+  - { field: spnManageDirectoryRole, value: true, capability: service_principals }
+  - { field: spnManageAppRoles, value: true, capability: service_principals }
+  - { field: spnManageGroups, value: true, capability: service_principals }
+  - { field: spnManageRBACRoles, value: true, capability: service_principals }
+  - { field: manageAdminConsentedPermissions, value: true, capability: service_principals }
+  - { field: manageCustomSecurityAttributesForServicePrincipals, value: true, capability: service_principals }
+  - { field: spnManageAzurePIM, value: false, capability: service_principals }
+  - { field: spnManageAzureADPIM, value: false, capability: service_principals }
+  # ai_agents: feature-toggles.json "ai-agents", except Copilot Studio, which stays off here: it needs a Power
+  # Platform application user (out of scope) and fails dataset aggregation without one (spec US4-4).
+  - { field: enableAIFoundryAgent, value: true, capability: ai_agents }
+  - { field: foundryAggregateLatestVersionOnly, value: true, capability: ai_agents }
+  - { field: enableCopilotAIAgent, value: false, capability: ai_agents }
+  - { field: enableMicrosoftAgent365, value: false, capability: ai_agents }
+
+# Toggles that may be switched off on their own (US4-4: Copilot Studio / Agent 365 turned on by someone else).
+switch_off: [enableCopilotAIAgent, enableMicrosoftAgent365]

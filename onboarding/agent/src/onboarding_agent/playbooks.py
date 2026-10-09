@@ -1,6 +1,7 @@
 """Connector playbooks (contracts/connector-playbook.md): catalog entry + setup steps, source settings, checks, known
 failures and collision rules, shipped with the image. Everything connector-specific lives here, not in tool code."""
 
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -26,6 +27,26 @@ class Playbook:
     suggestions: dict[str, Any] = field(default_factory=dict)   # suggestions.yaml: per role, per state (FR-006e)
     plan: list[dict[str, Any]] = field(default_factory=list)    # plan.yaml: the starting plan (FR-008b)
     values: dict[str, Any] = field(default_factory=dict)
+    assets: dict[str, str] = field(default_factory=dict)        # assets/<stem>.json, raw text with {placeholders}
+    permissions: dict[str, dict] = field(default_factory=dict)  # permissions/<profile>.json (spec 002 R15)
+    prompt: str = ""                                            # prompt.md: type rules appended to the static prompt
+
+    def asset(self, stem: str, **extra: Any) -> Any:
+        """An asset rendered with the session values (plus `extra`) and parsed; keys starting with _ dropped."""
+        saved = self.values
+        self.values = {**saved, **extra}
+        try:
+            data = json.loads(self.render(self.assets[stem]))
+        finally:
+            self.values = saved
+        return {k: v for k, v in data.items() if not k.startswith("_")} if isinstance(data, dict) else data
+
+    def permission_names(self, profile: str) -> list[str]:
+        names: list[str] = []
+        for res in (self.permissions.get(profile) or {}).get("resources") or []:
+            for kind in ("appRoles", "delegated"):
+                names += [p["name"] for p in res.get(kind) or []]
+        return names
 
     def render(self, text: str) -> str:
         """Fill {placeholders} from session details and tenant values; leave a visible marker for unknown ones."""
@@ -58,11 +79,18 @@ def load(type_id: str) -> Playbook:
         path = folder / name
         return path.read_text() if path.exists() else ""
 
+    def read_dir(name: str, parse: bool) -> dict[str, Any]:
+        sub = folder / name
+        if not sub.is_dir():
+            return {}
+        return {f.stem: (json.loads(f.read_text()) if parse else f.read_text()) for f in sorted(sub.glob("*.json"))}
+
     return Playbook(
-        id=type_id, entry=entry, setup=read("setup.md"),
+        id=type_id, entry=entry, setup=read("setup.md"), assets=read_dir("assets", False),
+        permissions=read_dir("permissions", True),
         settings=yaml.safe_load(read("settings.yaml") or "{}") or {},
         checks=yaml.safe_load(read("checks.yaml") or "{}") or {},
-        failures=read("failures.md"), collisions=read("collisions.md"),
+        failures=read("failures.md"), collisions=read("collisions.md"), prompt=read("prompt.md"),
         suggestions=yaml.safe_load(read("suggestions.yaml") or "{}") or {},
         plan=(yaml.safe_load(read("plan.yaml") or "{}") or {}).get("steps", []),
     )
@@ -76,7 +104,16 @@ def session_values(session: dict[str, Any]) -> dict[str, Any]:
                   external_id=tenant.get("external_id"))
     if values.get("accounts"):
         values["member_accounts"] = [a for a in values["accounts"] if a != values.get("management_account_id")]
+    if "capabilities" in values:  # spec 002: directory is always on
+        values["capabilities"] = chosen_capabilities(session)
+        values["subscription_count"] = str(len(values.get("foundry_subscriptions") or []))
+        values["source_name"] = values.get("source_name") or ""
     return values
+
+
+def chosen_capabilities(session: dict[str, Any]) -> list[str]:
+    chosen = list((session.get("details") or {}).get("capabilities") or [])
+    return chosen if "directory" in chosen else ["directory", *chosen]
 
 
 def _policies(folder: Path) -> dict[str, str]:
@@ -92,5 +129,7 @@ def _policies(folder: Path) -> dict[str, str]:
 def for_session(session: dict[str, Any]) -> Playbook:
     pb = load(session["connector_type"])
     folder = CATALOG_DIR / pb.entry["playbook"]
-    pb.values = (pb.settings.get("values") or {}) | _policies(folder) | session_values(session)
+    # permissions/<profile>.json -> {permissions_<profile>}: the names setup.md asks for (spec 002 R15)
+    perms = {f"permissions_{stem.replace('-', '_')}": " ".join(pb.permission_names(stem)) for stem in pb.permissions}
+    pb.values = (pb.settings.get("values") or {}) | _policies(folder) | perms | session_values(session)
     return pb

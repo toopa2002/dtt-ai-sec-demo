@@ -1,0 +1,28 @@
+{
+  "_notes": "Machine Account Classification for a Microsoft Entra source (UI: Machine Accounts → Classification, \"Enable Classification\" + \"Customize classification\"). Accounts matching either group are classified as machine accounts, and each gets a machine identity unless it is correlated to a human identity. Group 1: managed identities (managedIdentity_type); group 2: service principals (spn_servicePrincipalType Application or Legacy). Same criteria a UI-configured source shows by default (2026-10-08). Applied by `isc-source.sh classification` as PUT /v2026/sources/{id}/machine-classification-config (GA); `--process` then runs POST /v2026/sources/{id}/classify (the UI's \"Process Classification\") so already-aggregated accounts are classified too. Keys starting with _ are stripped before sending.",
+  "enabled": true,
+  "classificationMethod": "CRITERIA",
+  "criteria": {
+    "operation": "OR",
+    "caseSensitive": false,
+    "children": [
+      {
+        "operation": "OR",
+        "caseSensitive": false,
+        "children": [
+          { "operation": "EQUALS", "caseSensitive": false, "attribute": "managedIdentity_type", "value": "Microsoft.ManagedIdentity" },
+          { "operation": "EQUALS", "caseSensitive": false, "attribute": "managedIdentity_type", "value": "userAssignedIdentities" },
+          { "operation": "EQUALS", "caseSensitive": false, "attribute": "managedIdentity_type", "value": "systemAssignedIdentities" }
+        ]
+      },
+      {
+        "operation": "OR",
+        "caseSensitive": false,
+        "children": [
+          { "operation": "EQUALS", "caseSensitive": false, "attribute": "spn_servicePrincipalType", "value": "Application" },
+          { "operation": "EQUALS", "caseSensitive": false, "attribute": "spn_servicePrincipalType", "value": "Legacy" }
+        ]
+      }
+    ]
+  }
+}

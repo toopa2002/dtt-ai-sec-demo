@@ -4,13 +4,18 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
+from ..audit import audit
 from ..auth.deps import CurrentUser, current_user, error
 from ..catalog import catalog
 from ..db import db
+from ..masking import contains_entra_secret
+from ..sessions import repo
 from . import events, messages, suggestions, turns
 from .access import participant_session
 
 router = APIRouter(tags=["chat"])
+SECRET_EXPOSED_NOTE = ("A client secret was masked before it was saved, shown or sent to the agent. Treat it as exposed: "
+                       "delete it in Entra and create a new one.")
 
 
 class MessageIn(BaseModel):
@@ -50,15 +55,28 @@ async def send_message(session_id: str, body: MessageIn,
         attachment_ids.append(att["_id"])
     if not body.text.strip() and not attachment_ids:
         raise error("validation_failed", "Write a message or attach a screenshot.", status.HTTP_422_UNPROCESSABLE_CONTENT)
+    # Spec 002 (FR-123, research R17): an Entra client secret pasted into the chat is masked like any secret, and the
+    # pasted one counts as exposed: a system note says so at once, without a model call.
+    exposed = bool((catalog.get(session["connector_type"]) or {}).get("secret")) and contains_entra_secret(body.text)
     try:
         message = await messages.add(session["_id"], speaker=role, speaker_user_id=user.id, text=body.text,
-                                     attachment_ids=attachment_ids, queued=True)
+                                     attachment_ids=attachment_ids, queued=True,
+                                     meta={"secret_exposed": True} if exposed else None)
     except messages.MessageError as exc:
         raise error("validation_failed", str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT) from None
     names = await names_for(session)
     public = await messages.public(message, names)
+    note = None
+    if exposed:  # right after the masked message, before the agent's reply
+        note = await messages.add(session["_id"], speaker="agent", thread=role, kind="system_note", tone="danger",
+                                  code="secret_exposed", text=SECRET_EXPOSED_NOTE)
+        await audit.record("secret_exposed_in_chat", user.id, target=str(session["_id"]))
+        if role == "application_owner":
+            await repo.set_hint(session["_id"], "application_owner", "waiting_for_secret")
     reply = await turns.create_reply(session["_id"], message)  # FR-006h: the reply's status at once
     await events.emit(session["_id"], "message.created", public)
+    if note:
+        await events.emit(session["_id"], "message.created", await messages.public(note, names))
     await events.emit(session["_id"], "message.created", await messages.public(reply, names))
     await events.emit(session["_id"], "message.queue", {"message_id": public["id"], "queue_state": "queued"})
     turns.kick(session["_id"])

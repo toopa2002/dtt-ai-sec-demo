@@ -11,6 +11,7 @@ import {
   Message,
   Person,
   Role,
+  SecretStatus,
   Session,
   SessionSummary,
   Suggestions,
@@ -25,7 +26,12 @@ export function apiError(err: unknown): ApiError {
   if (err instanceof HttpErrorResponse) {
     const body = err.error as Partial<ApiError> | null;
     if (body && typeof body === 'object' && body.message) {
-      return { code: body.code ?? 'error', message: body.message, retry_after_seconds: body.retry_after_seconds };
+      return {
+        code: body.code ?? 'error',
+        message: body.message,
+        retry_after_seconds: body.retry_after_seconds,
+        errors: body.errors,
+      };
     }
     if (err.status === 0) return { code: 'offline', message: $localize`:@@error.offline:Can't reach the server.` };
   }
@@ -72,8 +78,16 @@ export class ApiService {
     tenant_id: string;
     details: Record<string, unknown>;
     application_owner_id?: string;
+    accept_warnings?: string[];
   }) {
-    return this.send<Session>('POST', 'sessions', body);
+    return this.send<Session & { warnings?: Record<string, string> }>('POST', 'sessions', body);
+  }
+  /** Spec 002 FR-120: write-only; the response is metadata only. */
+  putSecret(id: string, value: string, expiresOn: string) {
+    return this.send<SecretStatus>('PUT', `sessions/${id}/application-secret`, { value, expires_on: expiresOn });
+  }
+  secretStatus(id: string) {
+    return this.get<SecretStatus>(`sessions/${id}/application-secret`);
   }
   getSession(id: string) {
     return this.get<Session>(`sessions/${id}`);

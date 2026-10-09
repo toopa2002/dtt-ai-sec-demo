@@ -1,0 +1,7 @@
+{
+  "displayName": "${APP_NAME}",
+  "signInAudience": "AzureADMyOrg",
+  "notes": "Used by SailPoint Identity Security Cloud (Microsoft Entra SaaS connector). Created and managed by the sailpoint-isc-entra-connector skill; permissions come from its assets/entra/permissions/*.json profiles.",
+  "tags": ["sailpoint-isc-entra-connector"],
+  "requiredResourceAccess": "${REQUIRED_RESOURCE_ACCESS}"
+}

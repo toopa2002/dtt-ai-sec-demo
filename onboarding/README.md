@@ -25,12 +25,34 @@ Spec, plan and tasks: [`specs/001-isc-onboarding-agent/`](../specs/001-isc-onboa
 | MongoDB | local Kubernetes (StatefulSet + PVC) | accounts, sessions, transcripts, screenshots, action records |
 | `agent/` — AgentCore runtime `isc_onboarding_agent` | AWS AgentCore, ap-southeast-1, Claude Haiku 4.5 on Bedrock | nothing between turns (stateless) |
 | SailPoint credentials | AWS AgentCore Identity, one OAuth2 client-credentials provider per tenant | the ISC personal access token |
+| Application secrets (Entra) | AWS AgentCore Identity, one API-key provider per session, deleted once Test Connection passes | the Entra app's client secret Value |
 
 All user data stays on the local cluster. The agent receives one turn at a time from the API and never touches the
 application (no AWS tools).
 
 Connector types are data: [`catalog/catalog.yaml`](catalog/catalog.yaml) plus one playbook per type under
-[`catalog/playbooks/`](catalog/playbooks/). AWS SaaS is the first available type.
+[`catalog/playbooks/`](catalog/playbooks/). Two types are available:
+
+- **AWS SaaS** (spec 001), ported from `.claude/skills/sailpoint-isc-aws-connector`.
+- **Microsoft Entra ID** (spec 002), ported from `.claude/skills/sailpoint-isc-entra-connector`: SailPoint's cloud
+  "Microsoft Entra" connector on the ISC **v2026** API only, with four capabilities (directory always; service
+  principals, Azure AI Foundry agents and provisioning optional).
+
+### Microsoft Entra ID sessions (spec 002)
+
+- **Who prepares Entra**: the Entra administrator, with **Global Administrator** or **Privileged Role
+  Administrator** (activated first if it is PIM-eligible). The agent gives them `az` steps for the chosen capabilities
+  and checks what they paste back. It never signs in to Entra.
+- **The client secret** never goes through the chat or the agent. The administrator puts its **Value** and expiry date
+  into the **secret field** on their screen. The value goes to AgentCore Identity and from there into the source,
+  inside the tool code. The vault copy is deleted as soon as Test Connection passes, so ISC holds the only copy.
+  A secret pasted into the chat is masked, flagged as exposed, and replaced.
+- **Long aggregations** are followed by the session API without a model call. A step shows *pending* after 30 minutes,
+  and the result is posted to the IAM engineer's thread when it ends.
+- **Local runs**: `CREDENTIAL_STORE=discard` (dev.sh) keeps the secret in the API's memory for the local agent only,
+  and the API refuses that store on a cluster.
+- **Before release**: provisioning is specified from SailPoint's documentation and must be run once against a real
+  test tenant (quickstart §4 of spec 002).
 
 ## Make targets
 
@@ -92,6 +114,10 @@ static prompt (rules, playbook, tool definitions) so a call costs about $0.004 i
 | `make onboarding-e2e`, `smoke.py` against `AGENT_MODEL=fake` | none (scripted model) | $0 |
 | `REAL_MODEL=1 make onboarding-e2e` | about 40 per spec | about $1.50 for the suite |
 | `smoke.py --scenario happy\|trust\|confirm` against a real agent | 15-30 | under $0.15 |
+| `smoke.py --scenario entra-directory` against a real agent | about 12 | about $0.05 |
+| `run_evals.py --suite entra_failures` (3 runs, text + screenshot) | about 330 | about $1.30 |
+| `run_evals.py --suite entra_setup_checks` (3 runs, text) | about 60 | about $0.25 |
+| Real Entra + ISC test tenants (spec 002 quickstart §4) | about 30-60 | about $0.50-$1 |
 | `deploy/scripts/evals.sh` (3 runs) | about 300 | about $1.20 |
 | `make onboarding-evals` (gate, 10 runs) | about 1,000, or none when unchanged | about $4 |
 | Using the app (dev stack or cluster) | about 3-6 per message | about $0.02 per message |

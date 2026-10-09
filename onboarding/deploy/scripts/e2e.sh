@@ -21,4 +21,6 @@ cd "$ONB_ROOT/web"
 npx playwright install chromium >/dev/null
 npx playwright test "$@"
 step "leak scan"
-"$ONB_ROOT/deploy/scripts/leak-scan.sh" dev
+# spec 002 SC-102: the Entra specs submit this fixed test secret (web/e2e/helpers.ts); it must appear nowhere.
+ONB_LEAK_LITERALS="E2e7Q~e2e_test_secret_value_not_real_123 Smk3Q~smoke_test_secret_value_not_real_1" \
+  "$ONB_ROOT/deploy/scripts/leak-scan.sh" dev

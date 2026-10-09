@@ -1,0 +1,193 @@
+openapi: 3.0.3
+info:
+  title: ISC Onboarding session API — changes for spec 002 (Microsoft Entra ID)
+  version: 0.2.0
+  description: >-
+    New and changed paths only. Everything else is as in specs/001-isc-onboarding-agent/contracts/session-api.openapi.yaml.
+    No response ever contains the application secret value.
+servers:
+  - url: /onboarding/api
+paths:
+  /catalog:
+    get:
+      summary: Connector catalog (changed: entra-id available; capabilities, secret, new field types)
+      responses:
+        "200":
+          description: Catalog entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CatalogEntry" }
+  /sessions:
+    post:
+      summary: Create a session (changed: capability fields, warning acceptance, source_mode)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connector_type, tenant_id, details]
+              properties:
+                connector_type: { type: string, example: entra-id }
+                tenant_id: { type: string }
+                application_owner_id: { type: string }
+                details:
+                  type: object
+                  additionalProperties: true
+                  example:
+                    source_name: Entra ID - contoso-demo.onmicrosoft.com
+                    source_owner: iam.engineer@example.com
+                    tenant_domain: contoso-demo.onmicrosoft.com
+                    app_name: SailPoint ISC - acme-demo
+                    capabilities: [directory, service_principals, ai_agents]
+                    foundry_subscriptions: ["00000000-0000-0000-0000-000000000001"]
+                    source_mode: new
+                accept_warnings:
+                  type: array
+                  items: { type: string }
+                  description: capability ids whose warning the IAM engineer accepted (required for provisioning)
+      responses:
+        "201": { description: Created; body as GET /sessions/{id} }
+        "422":
+          description: Field errors, e.g. {"errors":{"foundry_subscriptions":"is required for AI agents","warnings_accepted":"accept the provisioning warning"}}
+  /sessions/{session_id}:
+    get:
+      summary: Session (changed: mode, application_secret metadata, followups, plan step capability/pending_since)
+      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [new, extend] }
+                  proof:
+                    type: object
+                    nullable: true
+                    description: IAM engineer only (omitted for the application owner)
+                    properties:
+                      users: { type: integer, nullable: true }
+                      service_principals: { type: integer, nullable: true }
+                      entitlements: { type: integer, nullable: true }
+                      ai_agents: { type: integer, nullable: true }
+                      ai_agents_state: { type: string, enum: [counted, tenant_limitation, not_chosen] }
+                      updated_at: { type: string, format: date-time }
+                  milestone_order: { type: array, items: { type: string } }
+                  application_secret: { $ref: "#/components/schemas/SecretStatus" }
+                  followups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        plan_step: { type: string }
+                        kind: { type: string }
+                        started_at: { type: string, format: date-time }
+                        state: { type: string, enum: [following, done, failed] }
+  /sessions/{session_id}/application-secret:
+    put:
+      summary: Submit or replace the application secret (application owner of this session only)
+      description: >-
+        Write-only. The value goes to the vault (AgentCore Identity API-key provider) and is never stored, logged,
+        echoed or sent in an event. The request body is excluded from request logging. Audited as
+        application_secret_received or application_secret_replaced.
+      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value, expires_on]
+              properties:
+                value: { type: string, format: password, minLength: 16, maxLength: 128, writeOnly: true }
+                expires_on: { type: string, format: date, description: "today < date <= today + 2 years" }
+      responses:
+        "200":
+          description: Stored; returns metadata only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretStatus" }
+        "403": { description: Not this session's application owner (IAM engineers and admins included) }
+        "409": { description: Session finished }
+        "422":
+          description: >-
+            {"errors":{"value":"this is the secret's ID, not its Value"}} or
+            {"errors":{"expires_on":"must be in the future and at most 2 years ahead"}}
+        "502": { description: Vault refused (AWS error code only) }
+    get:
+      summary: Secret status (both participants; metadata only)
+      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretStatus" }
+components:
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    SecretStatus:
+      type: object
+      nullable: true
+      properties:
+        state: { type: string, enum: [missing, received, in_isc, vault_deleted] }
+        provided_by: { type: string, description: display name }
+        provided_at: { type: string, format: date-time }
+        expires_on: { type: string, format: date }
+        expires_soon: { type: boolean, description: "≤ 30 days to expiry, computed on read" }
+        applied_at: { type: string, format: date-time, nullable: true }
+        replaced_at: { type: string, format: date-time, nullable: true }
+        vault_deleted_at: { type: string, format: date-time, nullable: true }
+    CatalogEntry:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [available, planned] }
+        description: { type: string }
+        owner_label: { type: string }
+        application_label: { type: string }
+        first_step_label: { type: string }
+        badge: { type: string, nullable: true }
+        owner_asks: { type: string }
+        agent_configures: { type: string }
+        secret:
+          type: object
+          nullable: true
+          properties: { label: { type: string }, help: { type: string }, expires_help: { type: string } }
+        capabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              label: { type: string }
+              summary: { type: string }
+              tag: { type: string, enum: [read_only, writes] }
+              owner_summary: { type: string, description: "permission counts already filled in" }
+              always: { type: boolean }
+              warning: { type: string }
+              requires_fields: { type: array, items: { type: string } }
+        session_fields:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              label: { type: string }
+              type:
+                type: string
+                enum: [string, string_list, region, region_list, aws_account_id, aws_account_id_list,
+                       entra_tenant, guid_list, domain, country_code, capabilities]
+              required: { type: boolean }
+              default: {}
+              show_if: { type: string }

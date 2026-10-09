@@ -3,11 +3,18 @@
 #   leak-scan.sh [dev|cluster]     dev = dev.sh stack (docker onb-mongo-test, .run/onboarding-dev/*.log, default)
 #                                  cluster = MongoDB pod and API pod logs in namespace onboarding
 #   ONB_AGENT_LOG_GROUP=/aws/bedrock-agentcore/runtimes/<id>-DEFAULT also scans the AgentCore runtime's CloudWatch logs.
+#   ONB_LEAK_LITERALS="value1 value2" also searches for known test secrets (spec 002 SC-102: the e2e run passes the
+#                                    application secret it submitted); each is matched as a fixed string.
 # Hits are reported by location and pattern only; the matched value is never printed.
 source "$(dirname "$0")/lib.sh"
 TARGET="${1:-dev}"
-# AWS access key ids, JWTs / bearer tokens, 64-hex strings (tenant client secrets, AWS secret-like material).
-PATTERNS=('(AKIA|ASIA)[0-9A-Z]{16}' 'eyJ[A-Za-z0-9_-]{10,}' '\b[0-9a-fA-F]{64}\b')
+# AWS access key ids, JWTs / bearer tokens, 64-hex strings (tenant client secrets, AWS secret-like material), and
+# Microsoft Entra client secret Values (spec 002 research R3: three characters, a digit, `Q~`, 31-34 more).
+PATTERNS=('(AKIA|ASIA)[0-9A-Z]{16}' 'eyJ[A-Za-z0-9_-]{10,}' '\b[0-9a-fA-F]{64}\b'
+          '[A-Za-z0-9_.-]{3}[0-9]Q~[A-Za-z0-9_.~-]{31,34}')
+for lit in ${ONB_LEAK_LITERALS:-}; do
+  PATTERNS+=("$(python3 -c 'import re,sys; print(re.escape(sys.argv[1]))' "$lit")")
+done
 COLLECTIONS='["messages","events","actions","audit","sessions"]'  # sessions: plan step titles and reasons (R22)
 hits=0
 

@@ -69,7 +69,7 @@ def test_offered_tools_by_role() -> None:
     owner = set(loop.offered_tools("application_owner"))
     iam = set(loop.offered_tools("iam_engineer"))
     assert not owner & WRITE_TOOLS
-    assert WRITE_TOOLS <= iam
+    assert WRITE_TOOLS & set(loop.LEGACY_ISC_TOOLS) <= iam  # spec 002 tools are offered only by playbooks that list them
     assert not any("aws" in name for name in iam | owner)  # no application-side tools exist
     assert {"post_to_other_thread", "notify_other_thread", "set_waiting", "suggest_replies"} <= owner
 

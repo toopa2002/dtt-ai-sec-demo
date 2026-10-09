@@ -1,14 +1,18 @@
 """/sessions (FR-005, US6). Only IAM engineers create; only participants read (404 otherwise)."""
 
+from datetime import UTC, datetime
+
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from ..audit import audit
 from ..auth.deps import CurrentUser, current_user, error, require_role
 from ..catalog import catalog
 from ..chat import events
 from ..chat.access import participant_session
 from ..db import db
+from ..secrets import service as secrets
 from ..tenants import service as tenants
 from . import plan as plans
 from . import repo
@@ -21,6 +25,7 @@ class SessionIn(BaseModel):
     tenant_id: str
     details: dict = Field(default_factory=dict)
     application_owner_id: str | None = None
+    accept_warnings: list[str] = Field(default_factory=list, max_length=10)  # spec 002 FR-103
 
 
 def summary(s: dict) -> dict:
@@ -57,6 +62,12 @@ async def full(s: dict) -> dict:
         if s.get("check_order") else None,
         "event_seq": s.get("event_seq", 0),
         "plan": plans.public(s.get("plan") or []),
+        "milestone_order": catalog.milestone_order(s["connector_type"]),
+        "mode": s.get("mode", "new"),
+        "proof": s.get("proof"),  # spec 002 R18; removed for the application owner in get_session
+        "followups": [{k: f.get(k) for k in ("plan_step", "kind", "started_at", "state")}
+                      for f in s.get("followups") or []],
+        "application_secret": secrets.status(s, {str(u["_id"]): u["display_name"] for u in users.values()}),
         "plan_done": done,
         "plan_total": total,
         "next_step_id": next_step,
@@ -113,21 +124,39 @@ async def create_session(body: SessionIn,
                         status.HTTP_422_UNPROCESSABLE_CONTENT)
         owner_id = owner["_id"]
     try:
-        details = catalog.validate_details(body.connector_type, body.details, tenant["name"])
+        details, warnings = catalog.validate(body.connector_type, body.details, tenant["name"])
     except catalog.DetailsError as exc:
-        raise error("validation_failed", str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT) from None
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail={
+            "code": "validation_failed", "message": str(exc), "errors": exc.errors}) from None
+    # FR-103: a capability with a warning (provisioning writes to the directory) needs the IAM engineer's acceptance.
+    caps = {c["id"]: c for c in connector.get("capabilities") or []}
+    needing = [c for c in details.get("capabilities") or [] if caps.get(c, {}).get("warning")]
+    missing = [c for c in needing if c not in body.accept_warnings]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail={
+            "code": "validation_failed", "message": "Accept the warning to continue.",
+            "errors": {"warnings_accepted": f"accept the {caps[missing[0]]['label'].lower()} warning"}})
+    if needing:
+        now = datetime.now(UTC).isoformat(timespec="seconds")  # details go into the agent payload as JSON
+        details["warnings_accepted"] = [{"capability": c, "user_id": str(user.id), "at": now} for c in needing]
     application = details.get("source_name") or connector["name"]
     title = f"{application} → {tenant['name']}"
     session = await repo.create(title=title, connector_type=body.connector_type, tenant_id=tenant["_id"],
                                 details=details, iam_engineer_id=user.id, application_owner_id=owner_id,
                                 plan=plans.seed(catalog.plan_template(body.connector_type), details))
-    return await full(session)
+    for c in needing:
+        await audit.record("provisioning_warning_accepted", user.id, target=str(session["_id"]),
+                           detail={"capability": c})
+    return await full(session) | ({"warnings": warnings} if warnings else {})
 
 
 @router.get("/{session_id}")
 async def get_session(session_id: str, user: CurrentUser = Depends(current_user)) -> dict:  # noqa: B008
-    session, _ = await participant_session(session_id, user)
-    return await full(session)
+    session, role = await participant_session(session_id, user)
+    out = await full(session)
+    if role != "iam_engineer":
+        out.pop("proof", None)  # SailPoint results: the IAM engineer passes them on (spec 002 R18)
+    return out
 
 
 @router.post("/{session_id}/finish")
@@ -137,5 +166,6 @@ async def finish_session(session_id: str,
     if role != "iam_engineer":
         raise error("forbidden_role", "Only the session's IAM engineer can finish it.", status.HTTP_403_FORBIDDEN)
     await repo.finish(session["_id"])
+    await secrets.discard_on_finish(session)
     await events.emit(session["_id"], "session.updated", {"status": "finished"})
     return await full(await repo.get(session["_id"]))  # type: ignore[arg-type]

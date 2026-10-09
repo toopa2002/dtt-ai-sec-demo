@@ -31,14 +31,47 @@ export interface ApiError {
   code: string;
   message: string;
   retry_after_seconds?: number;
+  /** Field-level messages of a 422 (spec 002: session fields, the secret field). */
+  errors?: Record<string, string>;
 }
 
 export interface SessionField {
   name: string;
   label: string;
-  type: 'string' | 'string_list' | 'region' | 'region_list' | 'aws_account_id' | 'aws_account_id_list';
+  type:
+    | 'string'
+    | 'string_list'
+    | 'region'
+    | 'region_list'
+    | 'aws_account_id'
+    | 'aws_account_id_list'
+    // spec 002 (Entra)
+    | 'entra_tenant'
+    | 'guid_list'
+    | 'domain'
+    | 'country_code'
+    | 'capabilities';
   required: boolean;
   default?: unknown;
+  /** Shown and validated only when this capability is chosen (spec 002). */
+  show_if?: string;
+  /** Allowed values (e.g. the source mode: new | extend). */
+  choices?: string[];
+}
+
+/** An optional part of an onboarding (spec 002: directory, service principals, AI agents, provisioning). */
+export interface Capability {
+  id: string;
+  label: string;
+  summary?: string;
+  tag: 'read_only' | 'writes';
+  /** One line for the "what happens" panel, with the permission count already filled in. */
+  owner_summary?: string;
+  always?: boolean;
+  enabled?: boolean;
+  /** A risk the IAM engineer must accept before the session starts (provisioning). */
+  warning?: string;
+  requires_fields?: string[];
 }
 
 export interface ConnectorType {
@@ -52,6 +85,37 @@ export interface ConnectorType {
   owner_asks: string;
   agent_configures: string;
   session_fields: SessionField[];
+  capabilities?: Capability[] | null;
+  /** The type needs an application secret, entered by the owner in the secret field (spec 002 FR-120). */
+  secret?: { label: string; help: string; expires_help: string } | null;
+  badge?: string | null;
+  isc_api?: string | null;
+  /** The starting plan, for the new-session "what happens" panel (spec 002 R15). */
+  plan_preview?: { id: string; title: string; actor: Role | 'agent'; kind: string; capability?: string | null }[];
+}
+
+export type SecretState = 'missing' | 'received' | 'in_isc' | 'vault_deleted';
+
+/** The application secret's metadata (spec 002): never the value. */
+export interface SecretStatus {
+  state: SecretState;
+  provided_by?: string | null;
+  provided_at?: string | null;
+  expires_on?: string | null;
+  expires_soon?: boolean;
+  applied_at?: string | null;
+  replaced_at?: string | null;
+  vault_deleted_at?: string | null;
+}
+
+/** "What SailPoint now sees" (spec 002 R18), IAM engineer only. */
+export interface Proof {
+  users?: number | null;
+  service_principals?: number | null;
+  entitlements?: number | null;
+  ai_agents?: number | null;
+  ai_agents_state?: 'counted' | 'tenant_limitation' | 'not_chosen';
+  updated_at?: string;
 }
 
 export interface Person {
@@ -74,7 +138,8 @@ export interface SessionSummary {
 export interface Session extends SessionSummary {
   tenant: { id: string; name: string; api_host: string; external_id: string | null } | null;
   details: Record<string, unknown>;
-  source: { id: string; name: string } | null;
+  /** `adopted`: created in an earlier session and only extended here (spec 002 FR-105). */
+  source: { id: string; name: string; adopted?: boolean } | null;
   /** Who the agent waits for; information only, it never holds a message back (FR-006a). */
   waiting_on: Role | null;
   /** The awaited person's next step, shown in the waiting banner (FR-006g); null without a wait. */
@@ -91,6 +156,12 @@ export interface Session extends SessionSummary {
   next_step_id?: string | null;
   finished_at?: string | null;
   reopened_at?: string | null;
+  /** Spec 002: header chip order from the playbook; the application secret's metadata; proof counts (IAM only). */
+  milestone_order?: StepKey[];
+  mode?: 'new' | 'extend';
+  application_secret?: SecretStatus | null;
+  proof?: Proof | null;
+  followups?: { plan_step: string | null; kind: string; started_at: string; state: string }[];
 }
 
 export interface Attachment {
@@ -126,6 +197,9 @@ export interface PlanStep {
   milestone: StepKey | null;
   added_by: 'playbook' | 'agent';
   changed_at: string;
+  /** Spec 002: the capability the step belongs to, and when a long-running step became pending. */
+  capability?: string | null;
+  pending_since?: string | null;
 }
 
 export interface Message {
@@ -152,6 +226,9 @@ export interface Message {
   attachments: Attachment[];
   application_steps?: ApplicationStep[];
   created_at: string;
+  /** Spec 002: a system note's tone (exposed secret, pending, finished) and code. */
+  tone?: 'info' | 'success' | 'danger';
+  code?: string | null;
   /** Client-side only: a reply still streaming in. */
   streaming?: boolean;
 }
@@ -162,8 +239,10 @@ export interface Action {
   source: { id: string; name: string } | null;
   ordered_by: { id: string; display_name: string };
   /** Why it ran: the IAM engineer's order, or a check rerun after the application owner confirmed a fix (FR-016a). */
-  trigger: 'order' | 'application_owner_confirmation';
-  result: 'ok' | 'failed' | 'running';
+  trigger: 'order' | 'application_owner_confirmation' | 'followup' | 'secret_submitted';
+  result: 'ok' | 'failed' | 'running' | 'tenant_limitation';
+  /** Spec 002: one line under the action name, e.g. "clientSecret: [vaulted] · 13 fields". */
+  summary?: string | null;
   /** One line, e.g. "passed · 3 accounts read" (FR-020a). */
   outcome?: string;
   order_message_id?: string | null;
@@ -172,7 +251,7 @@ export interface Action {
   response?: {
     task_ids?: string[];
     task_states?: Record<string, string>;
-    counts?: { accounts?: number; entitlements?: number };
+    counts?: { accounts?: number; entitlements?: number; users?: number; service_principals?: number; ai_agents?: number };
     error?: string | null;
   };
   response_missing?: boolean;

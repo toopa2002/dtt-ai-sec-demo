@@ -14,10 +14,12 @@ from .audit import routes as audit_routes
 from .auth import admin_routes
 from .auth import routes as auth_routes
 from .catalog import routes as catalog_routes
-from .chat import attachments, stream
+from .chat import attachments, followups, stream
 from .chat import routes as chat_routes
 from .config import settings
 from .logging import setup_logging
+from .secrets import routes as secret_routes
+from .secrets import store as secret_store
 from .sessions import admin_routes as session_admin_routes
 from .sessions import routes as session_routes
 from .tenants import routes as tenant_routes
@@ -26,8 +28,11 @@ from .tenants import routes as tenant_routes
 @asynccontextmanager
 async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     setup_logging()
+    secret_store.check_startup()
     await db.ensure_indexes()
+    followups.start_loop()  # spec 002 FR-139: long aggregations followed without a turn
     yield
+    await followups.stop_loop()
     await db.close()
 
 
@@ -36,7 +41,7 @@ app = FastAPI(title="ISC Onboarding — session API", lifespan=lifespan, docs_ur
 
 api = APIRouter(prefix=settings().base_path)
 for module in (auth_routes, admin_routes, catalog_routes, tenant_routes, session_routes, chat_routes, attachments,
-               stream, audit_routes, session_admin_routes):
+               stream, audit_routes, session_admin_routes, secret_routes):
     api.include_router(module.router)
 
 
@@ -52,6 +57,8 @@ async def metrics_summary() -> dict:
 
 
 app.include_router(api)
+if secret_store.local_mode():
+    app.include_router(secret_routes.local_router)
 if settings().web_dir:
     app.include_router(web.router(Path(settings().web_dir), settings().base_path.rsplit("/", 1)[0],
                                   settings().base_path))

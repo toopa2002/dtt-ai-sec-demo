@@ -12,7 +12,14 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.21", "ruff>=0.7", "mypy>=1.13"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "fastapi>=0.142.4",
+]
 evals = ["pillow>=11"]
 
 [build-system]

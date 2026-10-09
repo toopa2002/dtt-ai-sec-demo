@@ -1,0 +1,213 @@
+{
+  "_notes": "Account-schema attributes a Microsoft Entra source needs before 'Manage Microsoft Entra Service Principals as Accounts' aggregates service principals (SailPoint doc 'Service Principal as Accounts Attributes'). The UI adds them when the toggle is switched on; the API does not, so `isc-source.sh schema-spn` (run automatically by configure for the machine-identity profile) adds the missing ones with PATCH /v2026/sources/{id}/schemas/{accountSchemaId}. `schema` names an entitlement schema on the source; the script resolves it to {type, id, name}. Existing attributes are never changed.",
+  "attributes": [
+    {
+      "name": "objectId",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "ID of the user, service principal or managed identity (identity attribute)"
+    },
+    {
+      "name": "accountEnabled",
+      "type": "BOOLEAN",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Whether the user, service principal or managed identity is enabled"
+    },
+    {
+      "name": "description",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Address-book description of the user or service principal"
+    },
+    {
+      "name": "displayName",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Address-book display name of the user or service principal"
+    },
+    {
+      "name": "spn_appDisplayName",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Display name of the application"
+    },
+    {
+      "name": "spn_app_Description",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Application description"
+    },
+    {
+      "name": "spn_appId",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Application (client) ID"
+    },
+    {
+      "name": "spn_applicationTemplateId",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Application template ID"
+    },
+    {
+      "name": "spn_appOwnerOrganizationId",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Tenant ID where the application is registered"
+    },
+    {
+      "name": "spn_createdDateTime",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "When the application was registered"
+    },
+    {
+      "name": "spn_homepage",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Application home page URL"
+    },
+    {
+      "name": "spn_loginUrl",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Sign-in redirect URL"
+    },
+    {
+      "name": "spn_logoutUrl",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Sign-out URL"
+    },
+    {
+      "name": "spn_servicePrincipalType",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Application, ManagedIdentity or Legacy"
+    },
+    {
+      "name": "spn_signInAudience",
+      "type": "STRING",
+      "isMulti": false,
+      "isEntitlement": false,
+      "description": "Microsoft accounts supported by the application"
+    },
+    {
+      "name": "spn_passwordCredentials",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Password credentials on the service principal"
+    },
+    {
+      "name": "spn_keyCredentials",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Key credentials on the service principal"
+    },
+    {
+      "name": "spn_tags",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Tags on the service principal"
+    },
+    {
+      "name": "spn_app_owners",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Owners of the application"
+    },
+    {
+      "name": "spn_owner",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Owners of the service principal (users, as UPN)"
+    },
+    {
+      "name": "spn_app_passwordCredentials",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Password credentials on the application"
+    },
+    {
+      "name": "spn_app_keyCredentials",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "Key credentials on the application"
+    },
+    {
+      "name": "spn_appRoles",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": false,
+      "description": "App roles exposed by the application"
+    },
+    {
+      "name": "appRoleAssignments",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "schema": "applicationRole",
+      "description": "Application roles assigned to the account"
+    },
+    {
+      "name": "groups",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "schema": "group",
+      "description": "Groups of the user, service principal or managed identity"
+    },
+    {
+      "name": "roles",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "schema": "role",
+      "description": "Microsoft Entra roles of the account"
+    },
+    {
+      "name": "azureRoleAssignments",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "schema": "azureRoleAssignment",
+      "description": "Azure RBAC role assignments"
+    },
+    {
+      "name": "spn_adminConsentedPermissions",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "schema": "adminConsentedPermission",
+      "description": "Admin-consented permissions of the service principal"
+    },
+    {
+      "name": "spn_userConsentedPermissions",
+      "type": "STRING",
+      "isMulti": true,
+      "isEntitlement": true,
+      "description": "User-consented permissions of the service principal"
+    }
+  ]
+}

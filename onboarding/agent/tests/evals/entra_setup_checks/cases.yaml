@@ -1,0 +1,33 @@
+# Checking what the Entra administrator pastes back (spec 002 FR-112, US2-2, US2-6; T058a). Text only.
+# Estimate: 4 cases × 3 runs × ~5 calls ≈ 60 calls ≈ $0.25 (`--suite entra_setup_checks --estimate`).
+- id: S1
+  speaker: application_owner
+  side: any
+  modes: [text]
+  error: >-
+    Step 9 output: AuditLog.Read.All Group.Read.All Organization.Read.All RoleManagement.Read.Directory User.Read.All
+  cause: ['Application\.Read\.All.{0,80}(missing|not (granted|consented|there|listed))|(missing|not granted).{0,80}Application\.Read\.All',
+          'step 8']
+- id: S2
+  speaker: application_owner
+  side: any
+  modes: [text]
+  error: >-
+    Step 1 output: tenant 6c1e… user ploy@contoso-demo.onmicrosoft.com. Roles: Application Administrator, Reports Reader
+  cause: ['Global Administrator|Privileged Role Administrator']
+- id: S3
+  speaker: application_owner
+  side: any
+  modes: [text]
+  error: >-
+    Step 1 output: {"tenant": "9f2d7b1a-0000-4c3e-8a11-fabrikam00001", "user": "ploy@fabrikam-demo.onmicrosoft.com"}
+    Roles: Global Administrator
+  cause: ['(wrong|another|different) tenant', 'fabrikam', 'contoso-demo\.onmicrosoft\.com']
+- id: S4
+  speaker: application_owner
+  side: any
+  modes: [text]
+  error: >-
+    Step 9 output: Application.Read.All AuditLog.Read.All Group.Read.All Organization.Read.All
+    RoleManagement.Read.Directory User.Read.All
+  cause: ['(all|every).{0,40}(consent|granted|there|listed)', 'step 10', 'secret field']

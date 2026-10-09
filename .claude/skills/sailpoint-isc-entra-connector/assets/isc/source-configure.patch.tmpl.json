@@ -1,0 +1,6 @@
+[
+  { "op": "add", "path": "/connectorAttributes/domainName",   "value": "${DOMAIN_NAME}" },
+  { "op": "add", "path": "/connectorAttributes/clientID",     "value": "${CLIENT_ID}" },
+  { "op": "add", "path": "/connectorAttributes/clientSecret", "value": "${CLIENT_SECRET}" },
+  { "op": "add", "path": "/connectorAttributes/grantType",    "value": "${GRANT_TYPE}" }
+]

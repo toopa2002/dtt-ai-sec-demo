@@ -16,12 +16,23 @@ export interface Seed {
 const REPO = resolve(__dirname, '../../..');
 
 /** Fresh users/tenant/session through smoke.py --seed (same setup as the API smoke run). */
-export function seed(scenario: 'happy' | 'trust' = 'happy', messages = 0): Seed {
+export function seed(scenario: 'happy' | 'trust' | 'entra-directory' = 'happy', messages = 0,
+                     capabilities = 'directory'): Seed {
   const file = join(mkdtempSync(join(tmpdir(), 'onb-e2e-')), 'seed.json');
   execFileSync('uv', ['run', '-q', '--project', 'onboarding/api', 'python', 'onboarding/deploy/scripts/smoke.py',
-    '--scenario', scenario, '--seed', file, '--messages', String(messages)], { cwd: REPO, stdio: 'inherit' });
+    '--scenario', scenario, '--seed', file, '--messages', String(messages), '--capabilities', capabilities],
+  { cwd: REPO, stdio: 'inherit' });
   return JSON.parse(readFileSync(file, 'utf8')) as Seed;
 }
+
+/** Spec 002: an Entra stub switch (POST /_stub/entra/<name>). */
+export async function entraStub(s: Seed, name: string): Promise<void> {
+  const r = await fetch(`${s.stub}/_stub/entra/${name}`, { method: 'POST' });
+  expect(r.ok).toBeTruthy();
+}
+
+/** The test secret every Entra e2e run submits; e2e.sh passes it to the leak scan (SC-102). Not a real secret. */
+export const E2E_ENTRA_SECRET = 'E2e7Q~e2e_test_secret_value_not_real_123';
 
 export async function signIn(browser: Browser, username: string, password: string): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
@@ -55,7 +66,7 @@ export async function openOther(page: Page): Promise<void> {
 
 export async function send(page: Page, text: string): Promise<void> {
   await page.locator('#composer-text').fill(text);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 /** Waits until no reply in either thread is still received or working (FR-006h), then returns the last agent message

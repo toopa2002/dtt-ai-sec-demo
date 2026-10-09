@@ -12,7 +12,8 @@ from ..masking import mask
 MIN, MAX = 3, 5
 MAX_TEXT = 200
 KINDS = ("answer", "order", "question")
-STATES = ("no_source", "waiting_for_owner_output", "check_failed", "all_passed", "any")
+STATES = ("no_source", "waiting_for_owner_output", "check_failed", "all_passed", "any", "waiting_for_secret",
+          "tenant_limitation")
 CHECKS = ("connection_check", "aggregation", "test_connection")
 
 
@@ -22,7 +23,11 @@ def _state(session: dict, step: str) -> str:
 
 
 def current_state(session: dict, thread: str) -> str:
-    """The point in the session the suggestions are for, seen from one thread."""
+    """The point in the session the suggestions are for, seen from one thread. Spec 002: a hint the API set for the
+    thread (`waiting_for_secret`, `tenant_limitation`) comes first."""
+    hint = (session.get("suggestion_hints") or {}).get(thread)
+    if hint in STATES:
+        return hint
     if all(_state(session, k) == "passed" for k in CHECKS):
         return "all_passed"
     if any(_state(session, k) == "failed" for k in session.get("steps", {})):

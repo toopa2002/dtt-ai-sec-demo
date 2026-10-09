@@ -1,0 +1,30 @@
+# Starting plan for a Microsoft Entra ID session (spec 002 contracts/entra-playbook.md "plan.yaml"). Order follows
+# .claude/skills/sailpoint-isc-entra-connector SKILL.md (entra-setup.sh, then isc-source.sh create / configure /
+# verify), commits 9b53746, b71c53c.
+#   capability: skipped at seeding when that capability isn't chosen      on_extend: skip = only a new source needs it
+#   setup_step: the step number in setup.md      milestone: the FR-008 milestone it counts towards
+steps:
+  - {id: check_admin_role, title: Check your admin role, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 1}
+  - {id: check_app_name, title: Check the app name is free, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 2, on_extend: skip}
+  - {id: register_app, title: Register the SailPoint app, actor: application_owner, kind: change, milestone: application_ready, setup_step: 3, on_extend: skip}
+  - {id: directory_permissions, title: Add the directory read permissions, actor: application_owner, kind: change, milestone: application_ready, setup_step: 4, capability: directory, on_extend: skip}
+  - {id: sp_permissions, title: Add the service principal read permissions, actor: application_owner, kind: change, milestone: application_ready, setup_step: 5, capability: service_principals}
+  - {id: foundry_access, title: Give SailPoint read access to the Foundry subscriptions, actor: application_owner, kind: change, milestone: application_ready, setup_step: 6, capability: ai_agents}
+  - {id: provisioning_permissions, title: Add the write permissions and the User Administrator role, actor: application_owner, kind: change, milestone: application_ready, setup_step: 7, capability: provisioning}
+  - {id: grant_consent, title: Grant admin consent, actor: application_owner, kind: change, milestone: application_ready, setup_step: 8}
+  - {id: confirm_consent, title: Confirm consent for every permission, actor: application_owner, kind: read_only, milestone: application_ready, setup_step: 9}
+  - {id: provide_secret, title: Put a client secret into the secret field, actor: application_owner, kind: change, setup_step: 10, on_extend: skip}
+  - {id: order, title: "Order: create the connector and run the checks", actor: iam_engineer, kind: change}
+  - {id: create_source, title: Create the source, actor: agent, kind: change, milestone: source_created, on_extend: skip}
+  - {id: configure_source, title: Configure the source, actor: agent, kind: change, milestone: configured}
+  - {id: sp_schema, title: Add the service principal attributes, actor: agent, kind: change, capability: service_principals}
+  - {id: connection_check, title: Connection check (read 5 accounts), actor: agent, kind: read_only, milestone: connection_check}
+  - {id: test_connection, title: Test Connection, actor: agent, kind: read_only, milestone: test_connection}
+  - {id: aggregate_entitlements, title: Aggregate entitlements, actor: agent, kind: read_only, milestone: aggregation}
+  - {id: aggregate_accounts, title: Aggregate accounts (full read), actor: agent, kind: read_only, milestone: aggregation}
+  - {id: machine_classification, title: Turn on machine account classification, actor: agent, kind: change, capability: service_principals}
+  - {id: aggregate_foundry, title: Aggregate Foundry agents, actor: agent, kind: read_only, capability: ai_agents}
+  - {id: foundry_schedule, title: Turn on the Foundry schedule, actor: agent, kind: change, capability: ai_agents}
+  - {id: provisioning_policy, title: Set the account-creation policy and matching rule, actor: agent, kind: change, capability: provisioning}
+  - {id: confirm_provisioning_access, title: Show the app's directory role (read-only), actor: application_owner, kind: read_only, setup_step: 11, capability: provisioning}
+  - {id: review_lifecycle_actions, title: Review the leaver actions, actor: iam_engineer, kind: read_only, capability: provisioning}

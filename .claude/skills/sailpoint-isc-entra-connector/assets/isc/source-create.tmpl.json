@@ -1,0 +1,14 @@
+{
+  "name": "${SOURCE_NAME}",
+  "description": "${SOURCE_DESCRIPTION}",
+  "owner": { "type": "IDENTITY", "id": "${OWNER_ID}" },
+  "connector": "${CONNECTOR_SCRIPT}",
+  "connectorAttributes": {
+    "spConnectorSpecId": "${CONNECTOR_SPEC_ID}",
+    "idnProxyType": "sp-connect",
+    "connectionType": "direct",
+    "spConnectorSupportsCustomSchemas": true,
+    "healthCheckTimeout": 60,
+    "deleteThresholdPercentage": 10
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "profile": "machine-identity",
+  "description": "Entra service principals as accounts (filter servicePrincipalType eq 'Application') with their directory roles, app roles, group and role-assignment memberships, admin-consented permissions and custom security attributes (Machine Identity Governance). Managed identities stay off unless switched on in the source.",
+  "resources": [
+    {
+      "api": "Microsoft Graph",
+      "appId": "00000003-0000-0000-c000-000000000000",
+      "appRoles": [
+        {
+          "name": "Application.Read.All",
+          "why": "Aggregate service principals, app registrations, managed identities, app roles"
+        },
+        {
+          "name": "DelegatedPermissionGrant.Read.All",
+          "why": "Admin-consented (OAuth2) permission grants as entitlements"
+        },
+        {
+          "name": "Device.Read.All",
+          "why": "Device objects for NHI discovery"
+        },
+        {
+          "name": "CustomSecAttributeAssignment.Read.All",
+          "why": "Custom security attribute values on service principals (manageCustomSecurityAttributesForServicePrincipals)"
+        },
+        {
+          "name": "CustomSecAttributeDefinition.Read.All",
+          "why": "Custom security attribute definitions / attribute sets"
+        }
+      ]
+    }
+  ]
+}

@@ -66,9 +66,15 @@ def test_fingerprint_follows_its_inputs(ev, monkeypatch) -> None:  # type: ignor
     case_file.write_text(case_file.read_text() + "\n# note\n")
     third = ev.fingerprint()
     assert third != second
-    playbook = next((ev.REPO / "onboarding" / "catalog" / "playbooks").rglob("*.md"))
+    playbook = next((ev.REPO / "onboarding" / "catalog" / "playbooks" / "aws-saas").rglob("*.md"))
     playbook.write_text(playbook.read_text() + "\n")
     assert ev.fingerprint() != third
+    # spec 002 T076: another connector type's playbook doesn't touch the AWS gate
+    unchanged = ev.fingerprint()
+    other = next((ev.REPO / "onboarding" / "catalog" / "playbooks" / "entra-id").rglob("*.md"))
+    other.write_text(other.read_text() + "\n")
+    assert ev.fingerprint() == unchanged
+    assert ev.fingerprint("entra_failures") != unchanged
     before = ev.fingerprint()
     monkeypatch.setattr(ev, "MODEL_ID", "another-model")
     assert ev.fingerprint() != before

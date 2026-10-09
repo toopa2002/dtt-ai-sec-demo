@@ -10,7 +10,10 @@ import { ConnectorType } from '../shared/models';
   imports: [RouterLink],
   template: `
     <div class="wrap">
-      <h1 i18n="@@catalog.title">Connector types</h1>
+      <div class="head">
+        <h1 i18n="@@catalog.title">Connector types</h1>
+        <span class="muted small counts" i18n="@@catalog.counts">{{ available().length }} available · {{ planned().length }} planned</span>
+      </div>
       <p class="muted lede" i18n="@@catalog.lede">Each connector type tells the agent what to ask the application owner to set up, what to configure in SailPoint, which checks to run and which failures it knows how to fix. The list ships with each product version; it can't be changed here.</p>
       @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
 
@@ -18,9 +21,20 @@ import { ConnectorType } from '../shared/models';
       @for (c of available(); track c.id) {
         <article class="card available">
           <div class="main">
-            <h3>{{ c.name }} <span class="chip passed" i18n="@@catalog.availableChip">available</span></h3>
+            <h3>{{ c.name }} <span class="chip passed" i18n="@@catalog.availableChip">available</span>
+              @if (c.badge) { <span class="badge">{{ c.badge }}</span> }</h3>
             <p>{{ c.description }}</p>
             <p class="muted small"><span i18n="@@catalog.ownerIs">Application owner:</span> {{ c.owner_label }}</p>
+            @if (c.capabilities?.length) {
+              <ul class="caps" aria-label="Capabilities" i18n-aria-label="@@catalog.capsAria">
+                @for (cap of c.capabilities; track cap.id) {
+                  <li [class.writes]="cap.tag === 'writes'" [class.off]="cap.enabled === false">
+                    {{ cap.label }}@if (cap.tag === 'writes') { <span i18n="@@catalog.writes"> · writes</span> }
+                    @if (cap.enabled === false) { <span i18n="@@catalog.comingSoon"> · coming soon</span> }
+                  </li>
+                }
+              </ul>
+            }
           </div>
           <div><span class="label" i18n="@@catalog.asks">Application owner will be asked to</span><p>{{ c.owner_asks }}</p></div>
           <div><span class="label" i18n="@@catalog.configures">Agent configures in SailPoint</span><p>{{ c.agent_configures }}</p></div>
@@ -55,6 +69,13 @@ import { ConnectorType } from '../shared/models';
   styles: `
     .wrap { max-width: 72rem; margin: 0 auto; padding: 1.5rem; width: 100%; }
     h1 { margin: 0; font-size: 1.4rem; }
+    .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+    .badge { font-size: 0.72rem; font-weight: 600; padding: 0.05rem 0.55rem; border-radius: 999px;
+      background: var(--surface-2, #f2f2f2); color: var(--muted); }
+    .caps { list-style: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .caps li { font-size: 0.72rem; padding: 0.05rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); }
+    .caps li.writes { border-color: var(--warn); color: var(--warn); }
+    .caps li.off { opacity: 0.6; }
     .lede { max-width: 70ch; }
     h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.5rem 0 0.6rem; }
     .available { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 1.25rem;

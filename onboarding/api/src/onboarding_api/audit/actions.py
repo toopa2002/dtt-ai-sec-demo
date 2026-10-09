@@ -8,13 +8,25 @@ from bson import ObjectId
 from ..db import db
 from ..masking import mask_obj, mask_text
 
-ACTIONS = ("create_source", "configure_source", "connection_check", "aggregate", "test_connection", "delete_source")
-CHECKS = ("connection_check", "aggregate", "test_connection")
-TRIGGERS = ("order", "application_owner_confirmation")
+ACTIONS = ("create_source", "configure_source", "connection_check", "aggregate", "test_connection", "delete_source",
+           # spec 002 (Entra)
+           "aggregate_entitlements", "aggregate_accounts", "aggregate_datasets", "adopt_source",
+           "ensure_schema_attributes", "set_dataset_schedule", "set_provisioning_policy", "set_correlation",
+           "apply_application_secret", "set_machine_classification")
+CHECKS = ("connection_check", "aggregate", "test_connection", "aggregate_entitlements", "aggregate_accounts",
+          "aggregate_datasets")
+TRIGGERS = ("order", "application_owner_confirmation", "followup", "secret_submitted")
+RESULTS = ("ok", "failed", "running", "tenant_limitation")
+COUNT_KEYS = ("accounts", "entitlements", "users", "service_principals", "ai_agents")
+SUMMARY_MAX = 80
 
 
 OUTCOME = {"create_source": "created", "configure_source": "configured", "connection_check": "passed",
-           "aggregate": "completed", "test_connection": "passed", "delete_source": "deleted"}
+           "aggregate": "completed", "test_connection": "passed", "delete_source": "deleted",
+           "aggregate_entitlements": "completed", "aggregate_accounts": "completed", "aggregate_datasets": "completed",
+           "adopt_source": "bound", "ensure_schema_attributes": "updated", "set_dataset_schedule": "updated",
+           "set_provisioning_policy": "updated", "set_correlation": "updated", "apply_application_secret": "applied",
+           "set_machine_classification": "enabled"}
 DIAGNOSIS_MAX = 1000
 
 
@@ -22,6 +34,8 @@ def outcome(a: dict) -> str:
     """One line for the action list (FR-020a): "passed · 3 accounts read", "failed · <first error line>", "running"."""
     if a["result"] == "running":
         return "running"
+    if a["result"] == "tenant_limitation":
+        return "tenant limitation · start it in ISC"
     response = a.get("response") or {}
     if a["result"] == "failed":
         error = (response.get("error") or a.get("error") or "no error text").strip().splitlines()[0]
@@ -32,6 +46,8 @@ def outcome(a: dict) -> str:
         parts.append(f"{counts['accounts']:,} accounts" + (" read" if a["action"] == "connection_check" else ""))
     if counts.get("entitlements") is not None:
         parts.append(f"{counts['entitlements']:,} entitlements")
+    if counts.get("ai_agents") is not None:
+        parts.append(f"{counts['ai_agents']:,} AI agents")
     if a.get("source") and a["action"] == "create_source" and a["source"].get("id"):
         parts.append(f"id {str(a['source']['id'])[:8]}…")
     return " · ".join(parts)
@@ -40,7 +56,7 @@ def outcome(a: dict) -> str:
 def _response(event: dict) -> dict:
     """The response the tool got (masked); older agents sent only `error` and `task_ids`."""
     r = event.get("response") or {}
-    counts = {k: int(v) for k, v in (r.get("counts") or {}).items() if k in ("accounts", "entitlements")
+    counts = {k: int(v) for k, v in (r.get("counts") or {}).items() if k in COUNT_KEYS
               and isinstance(v, int | float)}
     return mask_obj({
         "task_ids": [str(t) for t in r.get("task_ids") or event.get("task_ids") or []],
@@ -71,7 +87,7 @@ async def record(session_id: ObjectId, tenant_id: ObjectId, *, ordered_by: Objec
     if trigger not in TRIGGERS:
         raise ValueError("unknown trigger")
     result = event.get("result")
-    result = result if result in ("ok", "failed", "running") else "failed"
+    result = result if result in RESULTS else "failed"
     response = _response(event)
     doc = {
         "session_id": session_id,
@@ -91,6 +107,8 @@ async def record(session_id: ObjectId, tenant_id: ObjectId, *, ordered_by: Objec
         "duration_ms": int(event["duration_ms"]) if isinstance(event.get("duration_ms"), int | float) else None,
         "at": datetime.now(UTC),
     }
+    if event.get("summary"):  # spec 002 R18: one masked line under the action name
+        doc["summary"] = mask_text(" ".join(str(event["summary"]).split()))[:SUMMARY_MAX]
     doc["outcome"] = outcome(doc)
     ref = event.get("action_ref")
     if isinstance(ref, str) and ref:
@@ -139,6 +157,7 @@ async def public(a: dict) -> dict:
         "response": a.get("response") or {"task_ids": a.get("task_ids", []), "error": a.get("error")},
         "response_missing": "response" not in a,
         "diagnosis": a.get("diagnosis"),
+        "summary": a.get("summary"),
         "error": a.get("error"),
         "task_ids": a.get("task_ids", []),
         "started_at": a.get("started_at"),
